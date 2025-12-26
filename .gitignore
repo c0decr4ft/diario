@@ -1,0 +1,30 @@
+# Environment variables
+.env
+
+# Data files
+data/*.xls
+data/*.xlsx
+data/*.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
