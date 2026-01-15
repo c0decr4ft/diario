@@ -23,15 +23,13 @@ use crate::types::HomeworkEntry;
 /// Application state shared across requests
 pub struct AppState {
     pub conn: Mutex<Connection>,
-    pub output_dir: PathBuf,
 }
 
 impl AppState {
-    /// Create a new AppState with a database connection and output directory
-    pub fn new(conn: Connection, output_dir: PathBuf) -> Self {
+    /// Create a new AppState with a database connection
+    pub fn new(conn: Connection) -> Self {
         Self {
             conn: Mutex::new(conn),
-            output_dir,
         }
     }
 }
@@ -133,7 +131,7 @@ pub fn init_server_state(output_dir: PathBuf) -> anyhow::Result<Arc<AppState>> {
     let total = db::count_entries(&conn)?;
     info!(count = total, "Database initialized");
 
-    Ok(Arc::new(AppState::new(conn, output_dir)))
+    Ok(Arc::new(AppState::new(conn)))
 }
 
 /// Get the migrations directory path
@@ -584,7 +582,7 @@ mod tests {
     /// Helper to create a test app state with a database
     fn test_state(entries: Vec<HomeworkEntry>) -> (TempDir, Arc<AppState>) {
         let (temp_dir, conn) = setup_test_db(&entries);
-        let state = Arc::new(AppState::new(conn, temp_dir.path().to_path_buf()));
+        let state = Arc::new(AppState::new(conn));
         (temp_dir, state)
     }
 
@@ -629,17 +627,10 @@ mod tests {
     // ========== AppState tests ==========
 
     #[test]
-    fn test_app_state_new() {
-        let (_temp_dir, conn) = setup_test_db(&[]);
-        let state = AppState::new(conn, PathBuf::from("/test/path"));
-        assert_eq!(state.output_dir, PathBuf::from("/test/path"));
-    }
-
-    #[test]
     fn test_app_state_db_access() {
         let entries = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-16", "Italiano", "Task 2"),
         ];
         let (_temp_dir, state) = test_state(entries);
 
@@ -681,8 +672,8 @@ mod tests {
     #[tokio::test]
     async fn test_index_handler_with_entries() {
         let entries = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Pag. 100"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Verifica"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Pag. 100"),
+            make_entry("nota", "2025-01-16", "Italiano", "Verifica"),
         ];
         let (_temp_dir, state) = test_state(entries);
         let app = create_router(state);
@@ -695,8 +686,8 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = body_to_string(response.into_body()).await;
-        assert!(body.contains("MATEMATICA"));
-        assert!(body.contains("ITALIANO"));
+        assert!(body.contains("Matematica"));
+        assert!(body.contains("Italiano"));
         assert!(body.contains("Pag. 100"));
         assert!(body.contains("Verifica"));
         assert!(body.contains("2025-01-15"));
@@ -743,8 +734,8 @@ mod tests {
     #[tokio::test]
     async fn test_entries_handler_with_data() {
         let entries = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-16", "Italiano", "Task 2"),
         ];
         let (_temp_dir, state) = test_state(entries);
         let app = create_router(state);
@@ -765,8 +756,8 @@ mod tests {
         let parsed: Vec<HomeworkEntry> = serde_json::from_str(&body).unwrap();
 
         assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].subject, "MATEMATICA");
-        assert_eq!(parsed[1].subject, "ITALIANO");
+        assert_eq!(parsed[0].subject, "Matematica");
+        assert_eq!(parsed[1].subject, "Italiano");
     }
 
     #[tokio::test]
@@ -793,7 +784,7 @@ mod tests {
         let entries = vec![make_entry(
             "compiti",
             "2025-01-15",
-            "MATEMATICA",
+            "Matematica",
             "Special chars: àèìòù & \"quotes\"",
         )];
         let (_temp_dir, state) = test_state(entries);
@@ -835,7 +826,7 @@ mod tests {
 
         let db_path = data_dir.join("homework.db");
         let conn = db::init_db(&db_path, &migrations_dir).unwrap();
-        let state = Arc::new(AppState::new(conn, temp_dir.path().to_path_buf()));
+        let state = Arc::new(AppState::new(conn));
         let app = create_router(state);
 
         let response = with_temp_dir_async(&temp_dir, || async {
@@ -874,12 +865,12 @@ mod tests {
         // Create export file
         create_test_export(
             &data_dir.join("export_test.xls"),
-            &[("compiti", "2025-01-15", "MATEMATICA", "Task 1")],
+            &[("compiti", "2025-01-15", "Matematica", "Task 1")],
         );
 
         let db_path = data_dir.join("homework.db");
         let conn = db::init_db(&db_path, &migrations_dir).unwrap();
-        let state = Arc::new(AppState::new(conn, temp_dir.path().to_path_buf()));
+        let state = Arc::new(AppState::new(conn));
         let app = create_router(state.clone());
 
         let response = with_temp_dir_async(&temp_dir, || async {
@@ -929,7 +920,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_db_access() {
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let (_temp_dir, state) = test_state(entries);
 
         // Simulate multiple sequential reads (Mutex doesn't allow true concurrent access)
@@ -1112,12 +1103,12 @@ mod tests {
         // Create database with no entries
         let db_path = data_dir.join("homework.db");
         let conn = db::init_db(&db_path, &migrations_dir).unwrap();
-        let state = AppState::new(conn, temp_dir.path().to_path_buf());
+        let state = AppState::new(conn);
 
         // Create export file with one entry
         create_test_export(
             &data_dir.join("export_test.xls"),
-            &[("compiti", "2025-01-15", "MATEMATICA", "Task 1")],
+            &[("compiti", "2025-01-15", "Matematica", "Task 1")],
         );
 
         let _lock = DIR_LOCK.lock().unwrap();
@@ -1157,15 +1148,15 @@ mod tests {
         // Create export file
         create_test_export(
             &data_dir.join("export_test.xls"),
-            &[("compiti", "2025-01-15", "MATEMATICA", "Task 1")],
+            &[("compiti", "2025-01-15", "Matematica", "Task 1")],
         );
 
         // Create database with same entries already imported
         let db_path = data_dir.join("homework.db");
         let conn = db::init_db(&db_path, &migrations_dir).unwrap();
-        let entry = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let entry = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
         db::insert_entry(&conn, &entry).unwrap();
-        let state = AppState::new(conn, temp_dir.path().to_path_buf());
+        let state = AppState::new(conn);
 
         let _lock = DIR_LOCK.lock().unwrap();
         let original_dir = std::env::current_dir().unwrap();
@@ -1200,7 +1191,7 @@ mod tests {
 
         let db_path = data_dir.join("homework.db");
         let conn = db::init_db(&db_path, &migrations_dir).unwrap();
-        let state = AppState::new(conn, temp_dir.path().to_path_buf());
+        let state = AppState::new(conn);
 
         let _lock = DIR_LOCK.lock().unwrap();
         let original_dir = std::env::current_dir().unwrap();
@@ -1222,7 +1213,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_entry_handler() {
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let entry_id = entries[0].id.clone();
         let (_temp_dir, state) = test_state(entries);
         let app = create_router(state);
@@ -1264,7 +1255,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_entry_handler() {
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let entry_id = entries[0].id.clone();
         let (_temp_dir, state) = test_state(entries);
         let app = create_router(state);
@@ -1295,14 +1286,14 @@ mod tests {
         // Create a parent and child entry
         {
             let conn = state.conn.lock().unwrap();
-            let parent = make_entry("compiti", "2025-01-20", "MATEMATICA", "Test");
+            let parent = make_entry("compiti", "2025-01-20", "Matematica", "Test");
             db::insert_entry(&conn, &parent).unwrap();
 
             let mut child = HomeworkEntry::with_id(
                 "child1".to_string(),
                 "studio".to_string(),
                 "2025-01-19".to_string(),
-                "MATEMATICA".to_string(),
+                "Matematica".to_string(),
                 "Study".to_string(),
             );
             child.parent_id = Some(parent.id.clone());

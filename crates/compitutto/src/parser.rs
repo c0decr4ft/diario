@@ -285,6 +285,9 @@ fn parse_row(row: &[String], col_indices: &HashMap<&'static str, usize>) -> Opti
         if let Some(extracted) = extract_subject_from_task(&task) {
             subject = extracted;
         }
+    } else {
+        // Normalize subject to title case
+        subject = to_title_case(&subject);
     }
 
     Some(HomeworkEntry::new(entry_type, date, subject, task))
@@ -292,32 +295,46 @@ fn parse_row(row: &[String], col_indices: &HashMap<&'static str, usize>) -> Opti
 
 /// Known subjects that can be extracted from task text
 const KNOWN_SUBJECTS: &[(&str, &str)] = &[
-    // Italian subject names -> canonical form
-    ("matematica", "MATEMATICA"),
-    ("aritmetica", "MATEMATICA"),
-    ("geometria", "MATEMATICA"),
-    ("italiano", "ITALIANO"),
-    ("antologia", "ITALIANO"),
-    ("storia", "STORIA"),
-    ("geografia", "GEOGRAFIA"),
-    ("inglese", "LINGUA INGLESE"),
-    ("english", "LINGUA INGLESE"),
-    ("verbi irregolari", "LINGUA INGLESE"), // English irregular verbs
-    ("tedesco", "SECONDA LINGUA COMUNITARIA"),
-    ("deutsch", "SECONDA LINGUA COMUNITARIA"),
-    ("arte", "ARTE E IMMAGINE"),
-    ("disegno", "ARTE E IMMAGINE"),
-    ("tecnologia", "TECNOLOGIA"),
-    ("proiezioni ortogonali", "TECNOLOGIA"),
-    ("scienze", "SCIENZE"),
-    ("lavoisier", "SCIENZE"), // Lavoisier's law = chemistry/science
-    ("musica", "MUSICA"),
-    ("ed. fisica", "EDUCAZIONE FISICA"),
-    ("educazione fisica", "EDUCAZIONE FISICA"),
-    ("religione", "RELIGIONE"),
-    ("ed. civica", "EDUCAZIONE CIVICA"),
-    ("educazione civica", "EDUCAZIONE CIVICA"),
+    // Italian subject names -> canonical form (title case)
+    ("matematica", "Matematica"),
+    ("aritmetica", "Matematica"),
+    ("geometria", "Matematica"),
+    ("italiano", "Italiano"),
+    ("antologia", "Italiano"),
+    ("storia", "Storia"),
+    ("geografia", "Geografia"),
+    ("inglese", "Lingua Inglese"),
+    ("english", "Lingua Inglese"),
+    ("verbi irregolari", "Lingua Inglese"), // English irregular verbs
+    ("tedesco", "Tedesco"),
+    ("deutsch", "Tedesco"),
+    ("arte", "Arte e Immagine"),
+    ("disegno", "Arte e Immagine"),
+    ("tecnologia", "Tecnologia"),
+    ("proiezioni ortogonali", "Tecnologia"),
+    ("scienze", "Scienze"),
+    ("lavoisier", "Scienze"), // Lavoisier's law = chemistry/science
+    ("musica", "Musica"),
+    ("ed. fisica", "Educazione Fisica"),
+    ("educazione fisica", "Educazione Fisica"),
+    ("religione", "Religione"),
+    ("ed. civica", "Educazione Civica"),
+    ("educazione civica", "Educazione Civica"),
 ];
+
+/// Convert a string to title case (e.g., "MATEMATICA" -> "Matematica")
+pub fn to_title_case(s: &str) -> String {
+    s.split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 /// Try to extract a subject from the task text
 ///
@@ -355,9 +372,8 @@ pub fn extract_subject_from_task(task: &str) -> Option<String> {
     // Pattern 2: Check if task starts with a subject name followed by colon
     // e.g., "Geometria: pag. 293..."
     for (keyword, canonical) in KNOWN_SUBJECTS {
-        if task_lower.starts_with(keyword) {
+        if let Some(after) = task_lower.strip_prefix(keyword) {
             // Check if followed by colon or space
-            let after = &task_lower[keyword.len()..];
             if after.starts_with(':') || after.starts_with(' ') {
                 return Some(canonical.to_string());
             }
@@ -491,7 +507,7 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].entry_type, "compiti");
         assert_eq!(entries[0].date, "2025-01-15");
-        assert_eq!(entries[0].subject, "MATEMATICA");
+        assert_eq!(entries[0].subject, "Matematica");
         assert_eq!(entries[0].task, "Pag. 100 es. 1-5");
     }
 
@@ -502,9 +518,9 @@ mod tests {
 
         assert_eq!(entries.len(), 3);
 
-        assert_eq!(entries[0].subject, "MATEMATICA");
-        assert_eq!(entries[1].subject, "ITALIANO");
-        assert_eq!(entries[2].subject, "INGLESE");
+        assert_eq!(entries[0].subject, "Matematica");
+        assert_eq!(entries[1].subject, "Italiano");
+        assert_eq!(entries[2].subject, "Inglese");
     }
 
     #[test]
@@ -932,7 +948,7 @@ mod tests {
 
         assert_eq!(entry.entry_type, "compiti");
         assert_eq!(entry.date, "2025-01-15");
-        assert_eq!(entry.subject, "MATEMATICA");
+        assert_eq!(entry.subject, "Matematica");
         assert_eq!(entry.task, "Pag. 100");
     }
 
@@ -987,7 +1003,7 @@ mod tests {
         indices.insert("task", 3);
 
         let entry = parse_row(&row, &indices).unwrap();
-        assert_eq!(entry.subject, "MATEMATICA");
+        assert_eq!(entry.subject, "Matematica");
     }
 
     #[test]
@@ -1009,7 +1025,7 @@ mod tests {
 
         assert_eq!(entry.entry_type, "compiti");
         assert_eq!(entry.date, "2025-01-15");
-        assert_eq!(entry.subject, "MATEMATICA");
+        assert_eq!(entry.subject, "Matematica");
         assert_eq!(entry.task, "Pag. 100");
     }
 
@@ -1018,7 +1034,7 @@ mod tests {
         let row = vec![
             "compiti".to_string(),
             "2025-01-15 12:00:00".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Task".to_string(),
         ];
 
@@ -1094,7 +1110,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].entry_type, "compiti");
         assert_eq!(entries[0].date, "2025-12-01");
-        assert_eq!(entries[0].subject, "SECONDA LINGUA COMUNITARIA");
+        assert_eq!(entries[0].subject, "Seconda Lingua Comunitaria");
         assert_eq!(entries[0].task, "Ü 15 auf Seite 118");
     }
 
@@ -1104,15 +1120,15 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_verifica_di() {
         assert_eq!(
             extract_subject_from_task("Verifica di matematica"),
-            Some("MATEMATICA".to_string())
+            Some("Matematica".to_string())
         );
         assert_eq!(
             extract_subject_from_task("VERIFICA DI STORIA"),
-            Some("STORIA".to_string())
+            Some("Storia".to_string())
         );
         assert_eq!(
             extract_subject_from_task("verifica di geografia sui fiumi"),
-            Some("GEOGRAFIA".to_string())
+            Some("Geografia".to_string())
         );
     }
 
@@ -1120,7 +1136,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_test_di() {
         assert_eq!(
             extract_subject_from_task("Test di inglese unit 3"),
-            Some("LINGUA INGLESE".to_string())
+            Some("Lingua Inglese".to_string())
         );
     }
 
@@ -1128,20 +1144,20 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_interrogazione() {
         assert_eq!(
             extract_subject_from_task("Interrogazione di storia cap 5"),
-            Some("STORIA".to_string())
+            Some("Storia".to_string())
         );
     }
 
     #[test]
     fn test_extract_subject_aritmetica_geometria() {
-        // Both map to MATEMATICA
+        // Both map to Matematica
         assert_eq!(
             extract_subject_from_task("Verifica di aritmetica"),
-            Some("MATEMATICA".to_string())
+            Some("Matematica".to_string())
         );
         assert_eq!(
             extract_subject_from_task("Verifica di geometria"),
-            Some("MATEMATICA".to_string())
+            Some("Matematica".to_string())
         );
     }
 
@@ -1149,7 +1165,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_tedesco() {
         assert_eq!(
             extract_subject_from_task("Verifica scritta di tedesco"),
-            Some("SECONDA LINGUA COMUNITARIA".to_string())
+            Some("Tedesco".to_string())
         );
     }
 
@@ -1157,7 +1173,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_ed_civica() {
         assert_eq!(
             extract_subject_from_task("verifica ed. civica sulla costituzione"),
-            Some("EDUCAZIONE CIVICA".to_string())
+            Some("Educazione Civica".to_string())
         );
     }
 
@@ -1165,7 +1181,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_portare_libro() {
         assert_eq!(
             extract_subject_from_task("Portare libro di storia"),
-            Some("STORIA".to_string())
+            Some("Storia".to_string())
         );
     }
 
@@ -1181,7 +1197,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_starts_with_colon() {
         assert_eq!(
             extract_subject_from_task("Geometria: pag. 293 n° 107"),
-            Some("MATEMATICA".to_string())
+            Some("Matematica".to_string())
         );
     }
 
@@ -1189,7 +1205,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_verbi_irregolari() {
         assert_eq!(
             extract_subject_from_task("Test scritto sui verbi irregolari"),
-            Some("LINGUA INGLESE".to_string())
+            Some("Lingua Inglese".to_string())
         );
     }
 
@@ -1197,7 +1213,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_in_inglese() {
         assert_eq!(
             extract_subject_from_task("Scrivere lettera in inglese"),
-            Some("LINGUA INGLESE".to_string())
+            Some("Lingua Inglese".to_string())
         );
     }
 
@@ -1205,7 +1221,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
     fn test_extract_subject_lavoisier() {
         assert_eq!(
             extract_subject_from_task("Attività di laboratorio: ripassare la legge di lavoisier"),
-            Some("SCIENZE".to_string())
+            Some("Scienze".to_string())
         );
     }
 
@@ -1225,7 +1241,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
         indices.insert("task", 3);
 
         let entry = parse_row(&row, &indices).unwrap();
-        assert_eq!(entry.subject, "MATEMATICA");
+        assert_eq!(entry.subject, "Matematica");
     }
 
     #[test]
@@ -1245,7 +1261,7 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
         indices.insert("task", 3);
 
         let entry = parse_row(&row, &indices).unwrap();
-        // Should keep the original subject, not extract from task
-        assert_eq!(entry.subject, "ITALIANO");
+        // Should keep the original subject (title cased), not extract from task
+        assert_eq!(entry.subject, "Italiano");
     }
 }

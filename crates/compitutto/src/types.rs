@@ -113,12 +113,6 @@ impl HomeworkEntry {
         format!("{:016x}", hasher.finish())
     }
 
-    /// Create a deduplication key for this entry
-    /// Two entries are considered duplicates if they have the same date, subject, and task
-    pub fn dedup_key(&self) -> String {
-        format!("{}|{}|{}", self.date, self.subject, self.task)
-    }
-
     /// Generate a stable ID for this entry based on its content.
     /// Used for persistent UI state (e.g., checkbox completion in localStorage).
     /// The ID is an 8-character hex string derived from hashing date+subject+task.
@@ -159,13 +153,13 @@ mod tests {
         let entry = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Pag. 100 es. 1-5".to_string(),
         );
 
         assert_eq!(entry.entry_type, "compiti");
         assert_eq!(entry.date, "2025-01-15");
-        assert_eq!(entry.subject, "MATEMATICA");
+        assert_eq!(entry.subject, "Matematica");
         assert_eq!(entry.task, "Pag. 100 es. 1-5");
         assert!(!entry.completed);
         assert_eq!(entry.position, 0);
@@ -176,49 +170,18 @@ mod tests {
     }
 
     #[test]
-    fn test_dedup_key_format() {
-        let entry = HomeworkEntry::new(
-            "nota".to_string(),
-            "2025-01-15".to_string(),
-            "ITALIANO".to_string(),
-            "Leggere capitolo 3".to_string(),
-        );
-
-        assert_eq!(entry.dedup_key(), "2025-01-15|ITALIANO|Leggere capitolo 3");
-    }
-
-    #[test]
-    fn test_dedup_key_ignores_entry_type() {
-        let entry1 = HomeworkEntry::new(
-            "compiti".to_string(),
-            "2025-01-15".to_string(),
-            "ITALIANO".to_string(),
-            "Leggere capitolo 3".to_string(),
-        );
-        let entry2 = HomeworkEntry::new(
-            "nota".to_string(),
-            "2025-01-15".to_string(),
-            "ITALIANO".to_string(),
-            "Leggere capitolo 3".to_string(),
-        );
-
-        // Same dedup key even with different entry_type
-        assert_eq!(entry1.dedup_key(), entry2.dedup_key());
-    }
-
-    #[test]
     fn test_homework_entry_equality() {
         // Entries with same content should have same source_id but different id
         let entry1 = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
         let entry2 = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
 
@@ -226,8 +189,6 @@ mod tests {
         assert_ne!(entry1.id, entry2.id);
         // Same source_id (content-based, used for deduplication)
         assert_eq!(entry1.source_id, entry2.source_id);
-        // Same dedup key
-        assert_eq!(entry1.dedup_key(), entry2.dedup_key());
     }
 
     #[test]
@@ -235,13 +196,13 @@ mod tests {
         let entry1 = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
         let entry2 = HomeworkEntry::new(
             "nota".to_string(), // Different type but same date/subject/task
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
 
@@ -264,7 +225,7 @@ mod tests {
         let entry = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
         let cloned = entry.clone();
@@ -281,7 +242,7 @@ mod tests {
         let entry = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Pag. 100".to_string(),
         );
 
@@ -289,7 +250,7 @@ mod tests {
         assert!(json.contains("\"id\":"));
         assert!(json.contains("\"type\":\"compiti\""));
         assert!(json.contains("\"date\":\"2025-01-15\""));
-        assert!(json.contains("\"subject\":\"MATEMATICA\""));
+        assert!(json.contains("\"subject\":\"Matematica\""));
         assert!(json.contains("\"task\":\"Pag. 100\""));
         assert!(json.contains("\"completed\":false"));
         assert!(json.contains("\"position\":0"));
@@ -300,13 +261,13 @@ mod tests {
     #[test]
     fn test_homework_entry_deserialization() {
         // Test with minimal JSON (using defaults for new fields)
-        let json = r#"{"id":"abc123","type":"nota","date":"2025-01-20","subject":"ITALIANO","task":"Studiare"}"#;
+        let json = r#"{"id":"abc123","type":"nota","date":"2025-01-20","subject":"Italiano","task":"Studiare"}"#;
         let entry: HomeworkEntry = serde_json::from_str(json).unwrap();
 
         assert_eq!(entry.id, "abc123");
         assert_eq!(entry.entry_type, "nota");
         assert_eq!(entry.date, "2025-01-20");
-        assert_eq!(entry.subject, "ITALIANO");
+        assert_eq!(entry.subject, "Italiano");
         assert_eq!(entry.task, "Studiare");
         assert!(!entry.completed); // default
         assert_eq!(entry.position, 0); // default
@@ -318,7 +279,7 @@ mod tests {
         let original = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi con caratteri speciali: àèìòù & <test>".to_string(),
         );
 
@@ -339,7 +300,6 @@ mod tests {
     fn test_homework_entry_empty_fields() {
         let entry = HomeworkEntry::new(String::new(), String::new(), String::new(), String::new());
 
-        assert_eq!(entry.dedup_key(), "||");
         assert!(entry.entry_type.is_empty());
         assert!(entry.date.is_empty());
         assert!(entry.subject.is_empty());
@@ -351,13 +311,13 @@ mod tests {
         let entry1 = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
         let entry2 = HomeworkEntry::new(
             "nota".to_string(), // Different type
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
 
@@ -374,13 +334,13 @@ mod tests {
         let entry1 = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Task A".to_string(),
         );
         let entry2 = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Task B".to_string(),
         );
 
@@ -393,7 +353,7 @@ mod tests {
         let entry = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
 
@@ -408,7 +368,7 @@ mod tests {
         let mut entry = HomeworkEntry::new(
             "studio".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Study for: Test".to_string(),
         );
 
@@ -425,7 +385,7 @@ mod tests {
         let mut entry = HomeworkEntry::new(
             "studio".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Study for: Test".to_string(),
         );
 
@@ -440,7 +400,7 @@ mod tests {
         let regular = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
         assert!(!regular.is_orphaned());
@@ -452,7 +412,7 @@ mod tests {
             "custom-id-123".to_string(),
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
 
@@ -467,13 +427,13 @@ mod tests {
         let entry1 = HomeworkEntry::new(
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
         let entry2 = HomeworkEntry::new(
             "nota".to_string(), // Different type
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Esercizi".to_string(),
         );
 

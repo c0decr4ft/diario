@@ -443,7 +443,7 @@ mod tests {
     #[test]
     fn test_insert_and_get_entry() {
         let (_temp_dir, conn) = setup_test_db();
-        let entry = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let entry = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
 
         insert_entry(&conn, &entry).unwrap();
 
@@ -453,7 +453,7 @@ mod tests {
         assert_eq!(retrieved.id, entry.id);
         assert_eq!(retrieved.entry_type, "compiti");
         assert_eq!(retrieved.date, "2025-01-15");
-        assert_eq!(retrieved.subject, "MATEMATICA");
+        assert_eq!(retrieved.subject, "Matematica");
         assert_eq!(retrieved.task, "Task 1");
     }
 
@@ -468,8 +468,8 @@ mod tests {
     fn test_get_all_entries_sorted() {
         let (_temp_dir, conn) = setup_test_db();
 
-        let entry1 = make_entry("compiti", "2025-01-20", "MATEMATICA", "Task 3");
-        let entry2 = make_entry("nota", "2025-01-10", "ITALIANO", "Task 1");
+        let entry1 = make_entry("compiti", "2025-01-20", "Matematica", "Task 3");
+        let entry2 = make_entry("nota", "2025-01-10", "Italiano", "Task 1");
         let entry3 = make_entry("compiti", "2025-01-15", "INGLESE", "Task 2");
 
         insert_entry(&conn, &entry1).unwrap();
@@ -486,7 +486,7 @@ mod tests {
     #[test]
     fn test_insert_entry_if_not_exists() {
         let (_temp_dir, conn) = setup_test_db();
-        let entry = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let entry = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
 
         // First insert should succeed
         let inserted = insert_entry_if_not_exists(&conn, &entry).unwrap();
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     fn test_update_entry() {
         let (_temp_dir, conn) = setup_test_db();
-        let entry = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let entry = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
         insert_entry(&conn, &entry).unwrap();
 
         let updates = EntryUpdate {
@@ -535,7 +535,7 @@ mod tests {
     #[test]
     fn test_delete_entry() {
         let (_temp_dir, conn) = setup_test_db();
-        let entry = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let entry = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
         insert_entry(&conn, &entry).unwrap();
 
         let deleted = delete_entry(&conn, &entry.id).unwrap();
@@ -558,14 +558,14 @@ mod tests {
     fn test_get_children() {
         let (_temp_dir, conn) = setup_test_db();
 
-        let parent = make_entry("compiti", "2025-01-20", "MATEMATICA", "Test");
+        let parent = make_entry("compiti", "2025-01-20", "Matematica", "Test");
         insert_entry(&conn, &parent).unwrap();
 
         let mut child1 = HomeworkEntry::with_id(
             "child1".to_string(),
             "studio".to_string(),
             "2025-01-18".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Study for: Test".to_string(),
         );
         child1.parent_id = Some(parent.id.clone());
@@ -575,7 +575,7 @@ mod tests {
             "child2".to_string(),
             "studio".to_string(),
             "2025-01-19".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Study for: Test".to_string(),
         );
         child2.parent_id = Some(parent.id.clone());
@@ -591,14 +591,14 @@ mod tests {
     fn test_delete_with_children() {
         let (_temp_dir, conn) = setup_test_db();
 
-        let parent = make_entry("compiti", "2025-01-20", "MATEMATICA", "Test");
+        let parent = make_entry("compiti", "2025-01-20", "Matematica", "Test");
         insert_entry(&conn, &parent).unwrap();
 
         let mut child = HomeworkEntry::with_id(
             "child1".to_string(),
             "studio".to_string(),
             "2025-01-18".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Study for: Test".to_string(),
         );
         child.parent_id = Some(parent.id.clone());
@@ -613,14 +613,14 @@ mod tests {
     fn test_delete_parent_orphans_children() {
         let (_temp_dir, conn) = setup_test_db();
 
-        let parent = make_entry("compiti", "2025-01-20", "MATEMATICA", "Test");
+        let parent = make_entry("compiti", "2025-01-20", "Matematica", "Test");
         insert_entry(&conn, &parent).unwrap();
 
         let mut child = HomeworkEntry::with_id(
             "child1".to_string(),
             "studio".to_string(),
             "2025-01-18".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Study for: Test".to_string(),
         );
         child.parent_id = Some(parent.id.clone());
@@ -640,11 +640,11 @@ mod tests {
     fn test_get_max_position_for_date() {
         let (_temp_dir, conn) = setup_test_db();
 
-        let mut entry1 = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let mut entry1 = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
         entry1.position = 0;
         insert_entry(&conn, &entry1).unwrap();
 
-        let mut entry2 = make_entry("nota", "2025-01-15", "ITALIANO", "Task 2");
+        let mut entry2 = make_entry("nota", "2025-01-15", "Italiano", "Task 2");
         entry2.position = 5;
         insert_entry(&conn, &entry2).unwrap();
 
@@ -667,14 +667,14 @@ mod tests {
             "id1".to_string(),
             "compiti".to_string(),
             "2025-01-15".to_string(),
-            "MATEMATICA".to_string(),
+            "Matematica".to_string(),
             "Task 1".to_string(),
         );
         let entry2 = HomeworkEntry::with_id(
             "id2".to_string(),
             "nota".to_string(),
             "2025-01-15".to_string(),
-            "ITALIANO".to_string(),
+            "Italiano".to_string(),
             "Task 2".to_string(),
         );
         let entry3 = HomeworkEntry::with_id(
@@ -706,7 +706,7 @@ mod tests {
     #[test]
     fn test_entry_exists() {
         let (_temp_dir, conn) = setup_test_db();
-        let entry = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let entry = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
 
         assert!(!entry_exists(&conn, &entry.id).unwrap());
 
@@ -722,8 +722,8 @@ mod tests {
         let (_temp_dir, conn) = setup_test_db();
 
         let entries = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-16", "Italiano", "Task 2"),
         ];
 
         let count = import_entries(&conn, &entries).unwrap();
@@ -745,7 +745,7 @@ mod tests {
     fn test_import_entries_skips_duplicates() {
         let (_temp_dir, conn) = setup_test_db();
 
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
 
         // Import once
         let count1 = import_entries(&conn, &entries).unwrap();
@@ -762,13 +762,13 @@ mod tests {
     fn test_import_entries_partial_duplicates() {
         let (_temp_dir, conn) = setup_test_db();
 
-        let entries1 = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries1 = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         import_entries(&conn, &entries1).unwrap();
 
         // Import with one existing and one new
         let entries2 = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"), // duplicate
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),      // new
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"), // duplicate
+            make_entry("nota", "2025-01-16", "Italiano", "Task 2"),      // new
         ];
 
         let count = import_entries(&conn, &entries2).unwrap();
@@ -784,7 +784,7 @@ mod tests {
         let (_temp_dir, conn) = setup_test_db();
 
         // Import an entry originally on 2025-01-15
-        let original = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let original = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
         let original_source_id = original.source_id.clone();
         import_entries(&conn, &[original.clone()]).unwrap();
         assert_eq!(count_entries(&conn).unwrap(), 1);
@@ -804,7 +804,7 @@ mod tests {
 
         // Now re-import the same entry (as if processing exports again)
         // This creates a new HomeworkEntry with the same content as the original
-        let reimport = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let reimport = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
         // The reimport should have the same source_id
         assert_eq!(reimport.source_id, original_source_id);
 

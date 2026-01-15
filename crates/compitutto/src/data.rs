@@ -234,8 +234,8 @@ mod tests {
         create_test_excel_xml(
             &data_dir.join("export_20250115.xls"),
             &[
-                ("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-                ("nota", "2025-01-16", "ITALIANO", "Task 2"),
+                ("compiti", "2025-01-15", "Matematica", "Task 1"),
+                ("nota", "2025-01-16", "Italiano", "Task 2"),
             ],
         );
 
@@ -266,7 +266,7 @@ mod tests {
 
         create_test_excel_xml(
             &data_dir.join("export_20250115.xls"),
-            &[("compiti", "2025-01-15", "MATEMATICA", "Valid")],
+            &[("compiti", "2025-01-15", "Matematica", "Valid")],
         );
         std::fs::write(data_dir.join("export_20250116.xls"), "invalid xml").unwrap();
 
@@ -285,11 +285,11 @@ mod tests {
 
         create_test_excel_xml(
             &data_dir.join("export_20250115.xls"),
-            &[("compiti", "2025-01-15", "MATEMATICA", "Task 1")],
+            &[("compiti", "2025-01-15", "Matematica", "Task 1")],
         );
         create_test_excel_xml(
             &data_dir.join("export_20250116.xls"),
-            &[("nota", "2025-01-16", "ITALIANO", "Task 2")],
+            &[("nota", "2025-01-16", "Italiano", "Task 2")],
         );
 
         let result = with_temp_dir(&temp_dir, parse_all_exports);
@@ -303,19 +303,19 @@ mod tests {
 
     #[test]
     fn test_is_test_verifica() {
-        let entry = make_entry("compiti", "2025-01-20", "MATEMATICA", "Verifica sui limiti");
+        let entry = make_entry("compiti", "2025-01-20", "Matematica", "Verifica sui limiti");
         assert!(is_test_or_quiz(&entry));
     }
 
     #[test]
     fn test_is_test_prova() {
-        let entry = make_entry("nota", "2025-01-20", "ITALIANO", "Prova di italiano");
+        let entry = make_entry("nota", "2025-01-20", "Italiano", "Prova di italiano");
         assert!(is_test_or_quiz(&entry));
     }
 
     #[test]
     fn test_is_test_interrogazione() {
-        let entry = make_entry("compiti", "2025-01-20", "STORIA", "Interrogazione cap. 5");
+        let entry = make_entry("compiti", "2025-01-20", "Storia", "Interrogazione cap. 5");
         assert!(is_test_or_quiz(&entry));
     }
 
@@ -327,13 +327,13 @@ mod tests {
 
     #[test]
     fn test_is_test_case_insensitive() {
-        let entry = make_entry("compiti", "2025-01-20", "MATEMATICA", "VERIFICA sui limiti");
+        let entry = make_entry("compiti", "2025-01-20", "Matematica", "VERIFICA sui limiti");
         assert!(is_test_or_quiz(&entry));
     }
 
     #[test]
     fn test_is_not_test_regular_homework() {
-        let entry = make_entry("compiti", "2025-01-20", "MATEMATICA", "Esercizi pag. 50");
+        let entry = make_entry("compiti", "2025-01-20", "Matematica", "Esercizi pag. 50");
         assert!(!is_test_or_quiz(&entry));
     }
 
@@ -341,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_generate_study_sessions_future_test() {
-        let test = make_entry("compiti", "2025-01-20", "MATEMATICA", "Verifica sui limiti");
+        let test = make_entry("compiti", "2025-01-20", "Matematica", "Verifica sui limiti");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
         let sessions = generate_study_sessions(&test, today);
@@ -359,14 +359,14 @@ mod tests {
         for session in &sessions {
             assert_eq!(session.parent_id, Some(test.id.clone()));
             assert_eq!(session.entry_type, "studio");
-            assert_eq!(session.subject, "MATEMATICA");
+            assert_eq!(session.subject, "Matematica");
             assert!(session.task.starts_with("Study for: "));
         }
     }
 
     #[test]
     fn test_generate_study_sessions_close_test() {
-        let test = make_entry("compiti", "2025-01-17", "MATEMATICA", "Verifica");
+        let test = make_entry("compiti", "2025-01-17", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
         let sessions = generate_study_sessions(&test, today);
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn test_generate_study_sessions_tomorrow_test() {
-        let test = make_entry("compiti", "2025-01-16", "MATEMATICA", "Verifica");
+        let test = make_entry("compiti", "2025-01-16", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
         let sessions = generate_study_sessions(&test, today);
@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_generate_study_sessions_past_test() {
-        let test = make_entry("compiti", "2025-01-10", "MATEMATICA", "Verifica");
+        let test = make_entry("compiti", "2025-01-10", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
         let sessions = generate_study_sessions(&test, today);
@@ -401,7 +401,7 @@ mod tests {
     #[test]
     fn test_generate_study_sessions_long_task_truncated() {
         let long_task = format!("Verifica su: {}", "a".repeat(200));
-        let test = make_entry("compiti", "2025-01-20", "MATEMATICA", &long_task);
+        let test = make_entry("compiti", "2025-01-20", "Matematica", &long_task);
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
         let sessions = generate_study_sessions(&test, today);
@@ -413,7 +413,7 @@ mod tests {
 
     #[test]
     fn test_generate_study_sessions_deterministic_ids() {
-        let test = make_entry("compiti", "2025-01-20", "MATEMATICA", "Verifica");
+        let test = make_entry("compiti", "2025-01-20", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
         let sessions1 = generate_study_sessions(&test, today);
@@ -427,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_generate_study_sessions_invalid_date() {
-        let test = make_entry("compiti", "invalid-date", "MATEMATICA", "Verifica");
+        let test = make_entry("compiti", "invalid-date", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
         let sessions = generate_study_sessions(&test, today);
@@ -438,7 +438,7 @@ mod tests {
 
     #[test]
     fn test_study_session_is_generated() {
-        let test = make_entry("compiti", "2025-01-20", "MATEMATICA", "Verifica");
+        let test = make_entry("compiti", "2025-01-20", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
         let sessions = generate_study_sessions(&test, today);

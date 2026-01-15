@@ -21,6 +21,7 @@ pub fn render_page(entries: &[HomeworkEntry]) -> Markup {
     }
 
     let total_count = entries.len();
+    let completed_count = entries.iter().filter(|e| e.completed).count();
 
     html! {
         (DOCTYPE)
@@ -37,8 +38,10 @@ pub fn render_page(entries: &[HomeworkEntry]) -> Markup {
                         div.header-left {
                             h1 { "Compitutto" }
                             div.stats {
+                                span #"completed-count" { (completed_count) }
+                                " / "
                                 span #"total-count" { (total_count) }
-                                " entries"
+                                " completed"
                             }
                         }
                         div.view-toggle {
@@ -101,7 +104,22 @@ pub fn render_page(entries: &[HomeworkEntry]) -> Markup {
                         }
                         div.form-group {
                             label for="new-entry-subject" { "Subject" }
-                            input #"new-entry-subject" type="text" placeholder="e.g., MATEMATICA" required;
+                            select #"new-entry-subject" required {
+                                option value="" disabled selected { "Select a subject..." }
+                                option value="Arte e Immagine" { "Arte e Immagine" }
+                                option value="Educazione Civica" { "Educazione Civica" }
+                                option value="Geografia" { "Geografia" }
+                                option value="Italiano" { "Italiano" }
+                                option value="Lingua Inglese" { "Lingua Inglese" }
+                                option value="Matematica" { "Matematica" }
+                                option value="Musica" { "Musica" }
+                                option value="Religione" { "Religione" }
+                                option value="Scienze" { "Scienze" }
+                                option value="Scienze Motorie" { "Scienze Motorie" }
+                                option value="Storia" { "Storia" }
+                                option value="Tecnologia" { "Tecnologia" }
+                                option value="Tedesco" { "Tedesco" }
+                            }
                         }
                         div.form-group {
                             label for="new-entry-type" { "Type" }
@@ -109,6 +127,8 @@ pub fn render_page(entries: &[HomeworkEntry]) -> Markup {
                                 option value="compiti" { "Compiti" }
                                 option value="nota" { "Nota" }
                                 option value="verifica" { "Verifica" }
+                                option value="interrogazione" { "Interrogazione" }
+                                option value="studio" { "Studio" }
                             }
                         }
                         div.form-group {
@@ -129,9 +149,19 @@ pub fn render_page(entries: &[HomeworkEntry]) -> Markup {
 }
 
 fn render_date_group(date: &str, items: &[&HomeworkEntry]) -> Markup {
+    let all_completed = items.iter().all(|item| item.completed);
+    let group_class = if all_completed {
+        "date-group collapsed"
+    } else {
+        "date-group"
+    };
     html! {
-        div.date-group data-date=(date) {
-            div.date-header { "📅 " (date) }
+        div class=(group_class) data-date=(date) {
+            div.date-header {
+                span.collapse-indicator { "▼" }
+                "📅 " (date)
+            }
+            div.date-items {
             @for item in items.iter() {
                 @let entry_id = &item.id;
                 @let stable_id = item.stable_id();
@@ -156,7 +186,8 @@ fn render_date_group(date: &str, items: &[&HomeworkEntry]) -> Markup {
                         div.homework-subject {
                             (item.subject)
                             @if !item.entry_type.is_empty() {
-                                span.homework-type { (item.entry_type) }
+                                @let type_lower = item.entry_type.to_lowercase();
+                                span.homework-type data-type=(type_lower) { (item.entry_type) }
                             }
                             @if is_generated {
                                 span.auto-badge { "auto" }
@@ -169,6 +200,7 @@ fn render_date_group(date: &str, items: &[&HomeworkEntry]) -> Markup {
                     }
                     button.delete-btn type="button" data-entry-id=(entry_id) title="Delete entry" { "🗑" }
                 }
+            }
             }
         }
     }
@@ -273,6 +305,10 @@ const CSS: &str = r#"
     box-sizing: border-box;
 }
 
+html, body {
+    height: 100%;
+}
+
 body {
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background: #0a0a0a;
@@ -300,9 +336,12 @@ body::before {
 
 .container {
     width: 100%;
+    min-height: 100%;
     padding: 30px 40px 60px;
     position: relative;
     z-index: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 /* Header styles */
@@ -398,23 +437,12 @@ h1 {
 }
 
 .date-group {
-    border-left: 4px solid;
-    border-image: linear-gradient(180deg, #ff0096, #00ffff) 1;
-    padding-left: 28px;
-    margin-left: 4px;
     position: relative;
 }
 
-.date-group::before {
-    content: '';
-    position: absolute;
-    left: -2px;
-    top: 0;
-    width: 8px;
-    height: 8px;
-    background: #00ffff;
-    box-shadow: 0 0 10px #00ffff;
-    border-radius: 50%;
+.date-items {
+    padding-left: 28px;
+    position: relative;
 }
 
 .date-header {
@@ -424,8 +452,44 @@ h1 {
     text-transform: uppercase;
     letter-spacing: 0.15em;
     margin-bottom: 28px;
-    padding-top: 4px;
+    margin-left: -28px;
+    padding: 12px 28px;
+    background: linear-gradient(90deg, rgba(255, 0, 150, 0.15) 0%, rgba(0, 255, 255, 0.1) 50%, transparent 100%);
+    border-left: 4px solid;
+    border-image: linear-gradient(180deg, #ff0096, #00ffff) 1;
     text-shadow: 0 0 8px rgba(0,255,255,0.6);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: background 0.2s;
+}
+
+.date-header:hover {
+    background: linear-gradient(90deg, rgba(255, 0, 150, 0.25) 0%, rgba(0, 255, 255, 0.15) 50%, transparent 100%);
+}
+
+.date-header .collapse-indicator {
+    font-size: 0.8em;
+    transition: transform 0.3s ease;
+    display: inline-block;
+}
+
+.date-group.collapsed .date-header .collapse-indicator {
+    transform: rotate(-90deg);
+}
+
+.date-group .date-items {
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+    max-height: 2000px;
+    opacity: 1;
+}
+
+.date-group.collapsed .date-items {
+    max-height: 0;
+    opacity: 0;
 }
 
 .homework-item {
@@ -440,17 +504,7 @@ h1 {
     position: relative;
 }
 
-.homework-item::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 3px;
-    height: 100%;
-    background: linear-gradient(180deg, #ff0096, #00ffff);
-    opacity: 0;
-    transition: opacity 0.2s;
-}
+
 
 .homework-item:hover {
     background: rgba(255,255,255,0.05);
@@ -458,9 +512,7 @@ h1 {
     transform: translateX(4px);
 }
 
-.homework-item:hover::before {
-    opacity: 1;
-}
+
 
 .homework-item:last-child {
     margin-bottom: 0;
@@ -497,8 +549,6 @@ h1 {
     display: flex;
     align-items: center;
     gap: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
 }
 
 .homework-type {
@@ -513,6 +563,36 @@ h1 {
     font-weight: 900;
     border: 1px solid #fff;
     box-shadow: 0 0 8px rgba(255,0,150,0.5);
+}
+
+/* Compiti - pink to purple */
+.homework-type[data-type="compiti"] {
+    background: linear-gradient(135deg, #ff0096, #9933ff);
+    box-shadow: 0 0 8px rgba(255,0,150,0.5);
+}
+
+/* Nota - blue to cyan */
+.homework-type[data-type="nota"] {
+    background: linear-gradient(135deg, #3366ff, #00ffff);
+    box-shadow: 0 0 8px rgba(0,255,255,0.5);
+}
+
+/* Verifica - orange to red (important!) */
+.homework-type[data-type="verifica"] {
+    background: linear-gradient(135deg, #ff6600, #ff0033);
+    box-shadow: 0 0 8px rgba(255,102,0,0.5);
+}
+
+/* Interrogazione - red to pink */
+.homework-type[data-type="interrogazione"] {
+    background: linear-gradient(135deg, #ff3366, #ff0096);
+    box-shadow: 0 0 8px rgba(255,51,102,0.5);
+}
+
+/* Studio - cyan to green */
+.homework-type[data-type="studio"] {
+    background: linear-gradient(135deg, #00ffff, #33ff99);
+    box-shadow: 0 0 8px rgba(0,255,255,0.5);
 }
 
 .homework-task {
@@ -555,22 +635,12 @@ h1 {
 
 /* Study session (generated) styling */
 .homework-item[data-generated="true"] {
-    border-left: 3px solid #00ffff;
     background: rgba(0, 255, 255, 0.03);
-}
-
-.homework-item[data-generated="true"]::before {
-    display: none;
 }
 
 /* Orphaned study session */
 .homework-item[data-orphaned="true"] {
-    border-left: 3px dashed #ff9900;
     background: rgba(255, 153, 0, 0.03);
-}
-
-.homework-item[data-orphaned="true"]::before {
-    display: none;
 }
 
 .auto-badge, .orphan-badge {
@@ -643,6 +713,11 @@ dialog {
     padding: 24px;
     max-width: 400px;
     width: 90%;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
 }
 
 dialog::backdrop {
@@ -758,6 +833,12 @@ dialog p {
     cursor: pointer;
 }
 
+/* Date input calendar icon fix for dark theme */
+.form-group input[type="date"]::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+}
+
 .form-group textarea {
     resize: vertical;
     min-height: 80px;
@@ -766,12 +847,16 @@ dialog p {
 /* Calendar view */
 .calendar-view {
     width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .calendar-layout {
     display: flex;
     gap: 24px;
-    min-height: 600px;
+    flex: 1;
+    min-height: 0;
 }
 
 .calendar-main {
@@ -780,6 +865,9 @@ dialog p {
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     padding: 24px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .calendar-header {
@@ -833,17 +921,21 @@ dialog p {
 .calendar-days {
     display: grid;
     grid-template-columns: repeat(7, 1fr);
+    grid-auto-rows: 1fr;
     gap: 8px;
+    flex: 1;
+    min-height: 0;
 }
 
 .cal-day {
-    min-height: 100px;
+    min-height: 80px;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     padding: 8px;
     transition: all 0.2s;
     cursor: pointer;
+    overflow: hidden;
 }
 
 .cal-day:hover {
@@ -1113,6 +1205,35 @@ dialog p {
 "#;
 
 const JAVASCRIPT: &str = r#"
+// ========== Helper Functions ==========
+
+function updateCompletedCount(delta) {
+    const el = document.getElementById('completed-count');
+    if (el) {
+        const current = parseInt(el.textContent) || 0;
+        el.textContent = current + delta;
+    }
+}
+
+// ========== Collapsible Date Sections ==========
+
+function checkAndCollapseIfAllCompleted(dateGroup) {
+    const items = dateGroup.querySelectorAll('.homework-item');
+    const allCompleted = Array.from(items).every(item => item.classList.contains('completed'));
+    
+    if (allCompleted && items.length > 0) {
+        dateGroup.classList.add('collapsed');
+    }
+}
+
+// Toggle collapse on date header click
+document.querySelectorAll('.date-header').forEach(header => {
+    header.addEventListener('click', function(e) {
+        const dateGroup = this.closest('.date-group');
+        dateGroup.classList.toggle('collapsed');
+    });
+});
+
 // ========== Checkbox Completion (API-backed) ==========
 
 document.querySelectorAll('.homework-checkbox').forEach(checkbox => {
@@ -1120,12 +1241,22 @@ document.querySelectorAll('.homework-checkbox').forEach(checkbox => {
         const entryId = this.getAttribute('data-entry-id');
         const item = document.querySelector(`[data-entry-id="${entryId}"]`);
         const isChecked = this.checked;
+        const dateGroup = item.closest('.date-group');
         
         // Optimistic UI update
         if (isChecked) {
             item.classList.add('completed');
+            updateCompletedCount(1);
         } else {
             item.classList.remove('completed');
+            updateCompletedCount(-1);
+            // Expand section when unchecking an item
+            dateGroup.classList.remove('collapsed');
+        }
+        
+        // Check if all items in this date group are completed
+        if (isChecked) {
+            checkAndCollapseIfAllCompleted(dateGroup);
         }
         
         // Persist to database via API
@@ -1140,12 +1271,20 @@ document.querySelectorAll('.homework-checkbox').forEach(checkbox => {
                 // Revert on error
                 this.checked = !isChecked;
                 item.classList.toggle('completed');
+                updateCompletedCount(isChecked ? -1 : 1);
+                if (isChecked) {
+                    dateGroup.classList.remove('collapsed');
+                }
                 console.error('Failed to update completion state');
             }
         } catch (error) {
             // Revert on error
             this.checked = !isChecked;
             item.classList.toggle('completed');
+            updateCompletedCount(isChecked ? -1 : 1);
+            if (isChecked) {
+                dateGroup.classList.remove('collapsed');
+            }
             console.error('Error updating completion:', error);
         }
     });
@@ -1385,7 +1524,7 @@ addEntryForm.addEventListener('submit', async (e) => {
     
     const entry = {
         date: document.getElementById('new-entry-date').value,
-        subject: document.getElementById('new-entry-subject').value.toUpperCase(),
+        subject: document.getElementById('new-entry-subject').value,
         entry_type: document.getElementById('new-entry-type').value,
         task: document.getElementById('new-entry-task').value
     };
@@ -1438,11 +1577,6 @@ function showCalendarView() {
 
 listViewBtn.addEventListener('click', showListView);
 calendarViewBtn.addEventListener('click', showCalendarView);
-
-// Restore preferred view
-if (localStorage.getItem('preferredView') === 'calendar') {
-    showCalendarView();
-}
 
 // ========== Calendar ==========
 
@@ -1545,8 +1679,10 @@ async function handleSidebarCheckbox(e) {
     // Optimistic UI update
     if (isChecked) {
         entryEl.classList.add('completed');
+        updateCompletedCount(1);
     } else {
         entryEl.classList.remove('completed');
+        updateCompletedCount(-1);
     }
     
     // Update local data
@@ -1576,6 +1712,7 @@ async function handleSidebarCheckbox(e) {
             // Revert on error
             e.target.checked = !isChecked;
             entryEl.classList.toggle('completed');
+            updateCompletedCount(isChecked ? -1 : 1);
             if (selectedDate && entriesByDate[selectedDate]) {
                 const entry = entriesByDate[selectedDate].find(e => e.id === entryId);
                 if (entry) entry.completed = !isChecked;
@@ -1586,8 +1723,40 @@ async function handleSidebarCheckbox(e) {
         // Revert on error
         e.target.checked = !isChecked;
         entryEl.classList.toggle('completed');
+        updateCompletedCount(isChecked ? -1 : 1);
         console.error('Error updating completion:', error);
     }
+}
+
+function calculateMaxEntries() {
+    // Calculate how many entries can fit in a calendar day cell
+    // Based on available height minus day number and padding
+    const calendarDaysRect = calendarDays.getBoundingClientRect();
+    if (calendarDaysRect.height === 0) return 2; // Fallback if not visible
+    
+    // Get number of rows in the current month view
+    const firstDay = new Date(currentYear, currentMonth - 1, 1);
+    const lastDay = new Date(currentYear, currentMonth, 0);
+    const daysInMonth = lastDay.getDate();
+    let startDayOfWeek = firstDay.getDay();
+    startDayOfWeek = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+    const numRows = Math.ceil((startDayOfWeek + daysInMonth) / 7);
+    
+    // Calculate cell height (account for gap)
+    const gap = 8;
+    const availableHeight = calendarDaysRect.height - (gap * (numRows - 1));
+    const cellHeight = availableHeight / numRows;
+    
+    // Reserve space for: day number (~24px), padding (16px), "+N more" line (~18px)
+    const dayNumberHeight = 24;
+    const padding = 16;
+    const moreIndicatorHeight = 18;
+    const entryHeight = 22; // Each entry is roughly 22px
+    
+    const availableForEntries = cellHeight - dayNumberHeight - padding - moreIndicatorHeight;
+    const maxEntries = Math.max(1, Math.floor(availableForEntries / entryHeight));
+    
+    return maxEntries;
 }
 
 function renderCalendar() {
@@ -1609,6 +1778,9 @@ function renderCalendar() {
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
     
+    // Calculate how many entries fit per cell
+    const maxEntries = calculateMaxEntries();
+    
     // Build calendar HTML
     let html = '';
     
@@ -1620,7 +1792,7 @@ function renderCalendar() {
     for (let i = startDayOfWeek - 1; i >= 0; i--) {
         const day = daysInPrevMonth - i;
         const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        html += renderCalendarDay(day, dateStr, true);
+        html += renderCalendarDay(day, dateStr, true, false, false, maxEntries);
     }
     
     // Current month days
@@ -1628,7 +1800,7 @@ function renderCalendar() {
         const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const isToday = dateStr === todayStr;
         const isSelected = dateStr === selectedDate;
-        html += renderCalendarDay(day, dateStr, false, isToday, isSelected);
+        html += renderCalendarDay(day, dateStr, false, isToday, isSelected, maxEntries);
     }
     
     // Next month days to fill the grid
@@ -1638,7 +1810,7 @@ function renderCalendar() {
     
     for (let day = 1; day <= totalCells - startDayOfWeek - daysInMonth; day++) {
         const dateStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        html += renderCalendarDay(day, dateStr, true);
+        html += renderCalendarDay(day, dateStr, true, false, false, maxEntries);
     }
     
     calendarDays.innerHTML = html;
@@ -1651,7 +1823,7 @@ function renderCalendar() {
     });
 }
 
-function renderCalendarDay(day, dateStr, isOtherMonth, isToday = false, isSelected = false) {
+function renderCalendarDay(day, dateStr, isOtherMonth, isToday = false, isSelected = false, maxEntries = 2) {
     const entries = entriesByDate[dateStr] || [];
     const hasEntries = entries.length > 0;
     
@@ -1664,9 +1836,9 @@ function renderCalendarDay(day, dateStr, isOtherMonth, isToday = false, isSelect
     let html = `<div class="${classes}" data-date="${dateStr}">`;
     html += `<div class="cal-day-number">${day}</div>`;
     
-    // Show up to 2 entries, then a "+N more" indicator
-    const maxEntries = 2;
-    entries.slice(0, maxEntries).forEach(entry => {
+    // Show entries up to maxEntries, then a "+N more" indicator
+    const entriesToShow = entries.slice(0, maxEntries);
+    entriesToShow.forEach(entry => {
         const completedClass = entry.completed ? ' completed' : '';
         html += `<div class="cal-entry${completedClass}">`;
         html += `<span class="cal-entry-subject">${escapeHtml(entry.subject)}</span>`;
@@ -1706,8 +1878,22 @@ calNext.addEventListener('click', () => {
     renderCalendar();
 });
 
-// Initial render if calendar view is active
-if (!calendarView.classList.contains('hidden')) {
+// Re-render calendar on window resize to adjust entry count
+let resizeTimeout;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+        if (!calendarView.classList.contains('hidden')) {
+            renderCalendar();
+        }
+    }, 150);
+});
+
+// Restore preferred view (must be after calendar variables are initialized)
+if (localStorage.getItem('preferredView') === 'calendar') {
+    showCalendarView();
+} else if (!calendarView.classList.contains('hidden')) {
+    // Initial render if calendar view is active for some other reason
     renderCalendar();
 }
 "#;
@@ -1746,12 +1932,12 @@ mod tests {
         let entries = vec![make_entry(
             "compiti",
             "2025-01-15",
-            "MATEMATICA",
+            "Matematica",
             "Pag. 100 es. 1-5",
         )];
         let html = render_page(&entries).into_string();
 
-        assert!(html.contains("MATEMATICA"));
+        assert!(html.contains("Matematica"));
         assert!(html.contains("Pag. 100 es. 1-5"));
         assert!(html.contains("2025-01-15"));
         assert!(html.contains("compiti"));
@@ -1761,13 +1947,13 @@ mod tests {
     #[test]
     fn test_render_page_multiple_entries_same_date() {
         let entries = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-15", "Italiano", "Task 2"),
         ];
         let html = render_page(&entries).into_string();
 
-        assert!(html.contains("MATEMATICA"));
-        assert!(html.contains("ITALIANO"));
+        assert!(html.contains("Matematica"));
+        assert!(html.contains("Italiano"));
         assert!(html.contains("Task 1"));
         assert!(html.contains("Task 2"));
         // Should only have one date-group element for 2025-01-15
@@ -1778,8 +1964,8 @@ mod tests {
     #[test]
     fn test_render_page_multiple_dates() {
         let entries = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-16", "Italiano", "Task 2"),
             make_entry("compiti", "2025-01-17", "INGLESE", "Task 3"),
         ];
         let html = render_page(&entries).into_string();
@@ -1792,7 +1978,7 @@ mod tests {
 
     #[test]
     fn test_render_page_has_required_elements() {
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let html = render_page(&entries).into_string();
 
         // Check document structure
@@ -1815,7 +2001,7 @@ mod tests {
 
     #[test]
     fn test_render_page_has_checkboxes() {
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let html = render_page(&entries).into_string();
 
         assert!(html.contains("homework-checkbox"));
@@ -1828,7 +2014,7 @@ mod tests {
         let entries = vec![make_entry(
             "compiti",
             "2025-01-15",
-            "MATEMATICA",
+            "Matematica",
             "<script>alert('xss')</script>",
         )];
         let html = render_page(&entries).into_string();
@@ -1843,7 +2029,7 @@ mod tests {
         let entries = vec![make_entry(
             "compiti",
             "2025-01-15",
-            "MATEMATICA",
+            "Matematica",
             "Esercizi con àèìòù & simboli",
         )];
         let html = render_page(&entries).into_string();
@@ -1857,12 +2043,12 @@ mod tests {
         let entries = vec![make_entry(
             "", // Empty type
             "2025-01-15",
-            "MATEMATICA",
+            "Matematica",
             "Task 1",
         )];
         let html = render_page(&entries).into_string();
 
-        assert!(html.contains("MATEMATICA"));
+        assert!(html.contains("Matematica"));
         assert!(html.contains("Task 1"));
         // Should not have a type badge element (span with homework-type class)
         // The CSS class definition will still be there, but no <span class="homework-type">
@@ -1871,7 +2057,7 @@ mod tests {
 
     #[test]
     fn test_render_page_entry_type_badge() {
-        let entries = vec![make_entry("nota", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("nota", "2025-01-15", "Matematica", "Task 1")];
         let html = render_page(&entries).into_string();
 
         assert!(html.contains("homework-type"));
@@ -1881,8 +2067,8 @@ mod tests {
     #[test]
     fn test_render_page_groups_entries_by_date() {
         let entries = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-15", "Italiano", "Task 2"),
             make_entry("compiti", "2025-01-16", "INGLESE", "Task 3"),
         ];
         let html = render_page(&entries).into_string();
@@ -1921,23 +2107,23 @@ mod tests {
     #[test]
     fn test_render_date_group_basic() {
         let entries = [
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-15", "Italiano", "Task 2"),
         ];
         let refs: Vec<&HomeworkEntry> = entries.iter().collect();
         let html = render_date_group("2025-01-15", &refs).into_string();
 
         assert!(html.contains("date-group"));
         assert!(html.contains("2025-01-15"));
-        assert!(html.contains("MATEMATICA"));
-        assert!(html.contains("ITALIANO"));
+        assert!(html.contains("Matematica"));
+        assert!(html.contains("Italiano"));
     }
 
     #[test]
     fn test_render_date_group_entry_ids_are_stable() {
         let entries = [
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-15", "Italiano", "Task 2"),
         ];
         let refs: Vec<&HomeworkEntry> = entries.iter().collect();
 
@@ -1957,8 +2143,8 @@ mod tests {
 
     #[test]
     fn test_render_date_group_ids_independent_of_position() {
-        let entry1 = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
-        let entry2 = make_entry("nota", "2025-01-16", "ITALIANO", "Task 2");
+        let entry1 = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
+        let entry2 = make_entry("nota", "2025-01-16", "Italiano", "Task 2");
 
         // Render entry1 in first position
         let refs1: Vec<&HomeworkEntry> = vec![&entry1, &entry2];
@@ -1981,7 +2167,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let html_path = temp_dir.path().join("index.html");
 
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
 
         generate_html(&entries, &html_path).unwrap();
 
@@ -1993,13 +2179,13 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let html_path = temp_dir.path().join("index.html");
 
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
 
         generate_html(&entries, &html_path).unwrap();
 
         let content = std::fs::read_to_string(&html_path).unwrap();
         assert!(content.contains("<!DOCTYPE html>"));
-        assert!(content.contains("MATEMATICA"));
+        assert!(content.contains("Matematica"));
         assert!(content.contains("Task 1"));
     }
 
@@ -2013,7 +2199,7 @@ mod tests {
         let entries = vec![make_entry(
             "compiti",
             "2025-01-15",
-            "MATEMATICA",
+            "Matematica",
             "New task",
         )];
 
@@ -2043,7 +2229,7 @@ mod tests {
         let entries = vec![make_entry(
             "compiti",
             "2025-01-15",
-            "MATEMATICA",
+            "Matematica",
             &long_task,
         )];
         let html = render_page(&entries).into_string();
@@ -2126,7 +2312,7 @@ mod tests {
 
     #[test]
     fn test_render_date_group_has_delete_buttons() {
-        let entries = [make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = [make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let refs: Vec<&HomeworkEntry> = entries.iter().collect();
         let html = render_date_group("2025-01-15", &refs).into_string();
 
@@ -2136,7 +2322,7 @@ mod tests {
 
     #[test]
     fn test_render_date_group_draggable() {
-        let entries = [make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = [make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let refs: Vec<&HomeworkEntry> = entries.iter().collect();
         let html = render_date_group("2025-01-15", &refs).into_string();
 
@@ -2145,7 +2331,7 @@ mod tests {
 
     #[test]
     fn test_render_date_group_data_date() {
-        let entries = [make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = [make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let refs: Vec<&HomeworkEntry> = entries.iter().collect();
         let html = render_date_group("2025-01-15", &refs).into_string();
 
@@ -2154,7 +2340,7 @@ mod tests {
 
     #[test]
     fn test_render_date_group_generated_entry() {
-        let mut entry = make_entry("studio", "2025-01-15", "MATEMATICA", "Study for: Test");
+        let mut entry = make_entry("studio", "2025-01-15", "Matematica", "Study for: Test");
         entry.parent_id = Some("parent123".to_string());
         let refs: Vec<&HomeworkEntry> = vec![&entry];
         let html = render_date_group("2025-01-15", &refs).into_string();
@@ -2166,7 +2352,7 @@ mod tests {
 
     #[test]
     fn test_render_date_group_orphaned_entry() {
-        let entry = make_entry("studio", "2025-01-15", "MATEMATICA", "Study for: Test");
+        let entry = make_entry("studio", "2025-01-15", "Matematica", "Study for: Test");
         // Note: entry_type is "studio" but parent_id is None, so is_orphaned() returns true
         let refs: Vec<&HomeworkEntry> = vec![&entry];
         let html = render_date_group("2025-01-15", &refs).into_string();
@@ -2178,7 +2364,7 @@ mod tests {
 
     #[test]
     fn test_render_date_group_completed_entry() {
-        let mut entry = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        let mut entry = make_entry("compiti", "2025-01-15", "Matematica", "Task 1");
         entry.completed = true;
         let refs: Vec<&HomeworkEntry> = vec![&entry];
         let html = render_date_group("2025-01-15", &refs).into_string();
@@ -2236,7 +2422,7 @@ mod tests {
 
     #[test]
     fn test_render_page_has_list_view() {
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let html = render_page(&entries).into_string();
 
         assert!(html.contains(r#"id="list-view""#));
@@ -2245,7 +2431,7 @@ mod tests {
 
     #[test]
     fn test_render_page_has_calendar_view() {
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let html = render_page(&entries).into_string();
 
         assert!(html.contains(r#"id="calendar-view""#));
@@ -2290,15 +2476,15 @@ mod tests {
     #[test]
     fn test_render_page_calendar_contains_entries_data() {
         let entries = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-16", "Italiano", "Task 2"),
         ];
         let html = render_page(&entries).into_string();
 
         // Calendar should have data-entries attribute with JSON
         assert!(html.contains("data-entries="));
-        assert!(html.contains("MATEMATICA"));
-        assert!(html.contains("ITALIANO"));
+        assert!(html.contains("Matematica"));
+        assert!(html.contains("Italiano"));
     }
 
     #[test]
@@ -2348,8 +2534,8 @@ mod tests {
     #[test]
     fn test_render_page_dates_in_reverse_chronological_order() {
         let entries = vec![
-            make_entry("compiti", "2025-01-10", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-10", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-15", "Italiano", "Task 2"),
             make_entry("compiti", "2025-01-20", "INGLESE", "Task 3"),
         ];
         let html = render_page(&entries).into_string();
@@ -2384,8 +2570,8 @@ mod tests {
     #[test]
     fn test_entries_to_json() {
         let entries = [
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-15", "Matematica", "Task 1"),
+            make_entry("nota", "2025-01-15", "Italiano", "Task 2"),
         ];
         let refs: Vec<&HomeworkEntry> = entries.iter().collect();
         let mut by_date: BTreeMap<&str, Vec<&HomeworkEntry>> = BTreeMap::new();
@@ -2394,8 +2580,8 @@ mod tests {
         let json = entries_to_json(&by_date);
 
         assert!(json.contains("2025-01-15"));
-        assert!(json.contains("MATEMATICA"));
-        assert!(json.contains("ITALIANO"));
+        assert!(json.contains("Matematica"));
+        assert!(json.contains("Italiano"));
         assert!(json.contains("Task 1"));
         assert!(json.contains("Task 2"));
     }
@@ -2409,7 +2595,7 @@ mod tests {
 
     #[test]
     fn test_render_calendar_basic() {
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-01-15", "Matematica", "Task 1")];
         let refs: Vec<&HomeworkEntry> = entries.iter().collect();
         let mut by_date: BTreeMap<&str, Vec<&HomeworkEntry>> = BTreeMap::new();
         by_date.insert("2025-01-15", refs);
@@ -2426,7 +2612,7 @@ mod tests {
 
     #[test]
     fn test_render_calendar_month_from_entries() {
-        let entries = vec![make_entry("compiti", "2025-03-15", "MATEMATICA", "Task 1")];
+        let entries = vec![make_entry("compiti", "2025-03-15", "Matematica", "Task 1")];
         let refs: Vec<&HomeworkEntry> = entries.iter().collect();
         let mut by_date: BTreeMap<&str, Vec<&HomeworkEntry>> = BTreeMap::new();
         by_date.insert("2025-03-15", refs);

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use tracing::{info, Level};
+use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 
 mod data;
@@ -52,11 +52,7 @@ fn init_tracing(log_level: &str) {
         .add_directive("hyper=warn".parse().unwrap())
         .add_directive("tower_http=warn".parse().unwrap());
 
-    fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .with_max_level(Level::TRACE)
-        .init();
+    fmt().with_env_filter(filter).with_target(false).init();
 }
 
 #[tokio::main]

@@ -3,6 +3,7 @@ name = "compitutto"
 version = "0.1.0"
 edition = "2021"
 description = "Parse homework calendar exports and generate a web view"
+license = "MIT"
 
 [[bin]]
 name = "compitutto"
