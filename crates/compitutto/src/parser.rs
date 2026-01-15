@@ -9,6 +9,21 @@ use std::path::Path;
 
 use crate::types::HomeworkEntry;
 
+/// Keywords that indicate a test/exam entry (case-insensitive)
+const TEST_KEYWORDS: &[&str] = &["verifica", "prova", "test", "interrogazione"];
+
+/// Check if task text contains test keywords, returning "verifica" if so
+fn detect_entry_type(task: &str, original_type: &str) -> String {
+    let task_lower = task.to_lowercase();
+    if TEST_KEYWORDS.iter().any(|kw| task_lower.contains(kw)) {
+        "verifica".to_string()
+    } else if original_type.is_empty() {
+        "nota".to_string() // default type
+    } else {
+        original_type.to_string()
+    }
+}
+
 /// Parse an Excel file and extract homework entries.
 /// Supports SpreadsheetML XML format (.xls with XML content) and modern Excel formats (.xlsx, .xlsb, .ods)
 pub fn parse_excel_xml(path: &Path) -> Result<Vec<HomeworkEntry>> {
@@ -270,7 +285,7 @@ fn parse_row(row: &[String], col_indices: &HashMap<&'static str, usize>) -> Opti
             .unwrap_or_default()
     };
 
-    let entry_type = get_col("type");
+    let raw_type = get_col("type");
     let date = normalize_date(&get_col("date"));
     let mut subject = get_col("subject");
     let task = get_col("task");
@@ -279,6 +294,9 @@ fn parse_row(row: &[String], col_indices: &HashMap<&'static str, usize>) -> Opti
     if task.is_empty() && subject.is_empty() {
         return None;
     }
+
+    // Detect entry type based on task content (e.g., verifica, prova, test)
+    let entry_type = detect_entry_type(&task, &raw_type);
 
     // If subject is empty, try to extract it from the task text
     if subject.is_empty() {
@@ -1263,5 +1281,121 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
         let entry = parse_row(&row, &indices).unwrap();
         // Should keep the original subject (title cased), not extract from task
         assert_eq!(entry.subject, "Italiano");
+    }
+
+    // ========== detect_entry_type tests ==========
+
+    #[test]
+    fn test_detect_entry_type_verifica() {
+        assert_eq!(
+            detect_entry_type("Verifica di matematica", "nota"),
+            "verifica"
+        );
+        assert_eq!(
+            detect_entry_type("verifica capitolo 3", "compiti"),
+            "verifica"
+        );
+        assert_eq!(detect_entry_type("VERIFICA FINALE", ""), "verifica");
+    }
+
+    #[test]
+    fn test_detect_entry_type_prova() {
+        assert_eq!(detect_entry_type("Prova di italiano", "nota"), "verifica");
+        assert_eq!(detect_entry_type("prova scritta", "compiti"), "verifica");
+    }
+
+    #[test]
+    fn test_detect_entry_type_test() {
+        assert_eq!(detect_entry_type("Test unit 5", "nota"), "verifica");
+        assert_eq!(detect_entry_type("English test", "compiti"), "verifica");
+    }
+
+    #[test]
+    fn test_detect_entry_type_interrogazione() {
+        assert_eq!(
+            detect_entry_type("Interrogazione storia", "nota"),
+            "verifica"
+        );
+        assert_eq!(
+            detect_entry_type("interrogazione capitolo 2", ""),
+            "verifica"
+        );
+    }
+
+    #[test]
+    fn test_detect_entry_type_preserves_original() {
+        // Regular homework should keep original type
+        assert_eq!(detect_entry_type("Esercizi pag. 50", "compiti"), "compiti");
+        assert_eq!(detect_entry_type("Leggere capitolo 3", "nota"), "nota");
+    }
+
+    #[test]
+    fn test_detect_entry_type_defaults_to_nota() {
+        // When original type is empty and no test keywords, default to nota
+        assert_eq!(detect_entry_type("Esercizi pag. 50", ""), "nota");
+    }
+
+    #[test]
+    fn test_detect_entry_type_case_insensitive() {
+        assert_eq!(detect_entry_type("VERIFICA", "nota"), "verifica");
+        assert_eq!(detect_entry_type("Verifica", "nota"), "verifica");
+        assert_eq!(detect_entry_type("vErIfIcA", "nota"), "verifica");
+    }
+
+    #[test]
+    fn test_parse_row_detects_verifica() {
+        let row = vec![
+            "nota".to_string(),
+            "2025-01-15".to_string(),
+            "MATEMATICA".to_string(),
+            "Verifica sui limiti".to_string(),
+        ];
+
+        let mut indices = HashMap::new();
+        indices.insert("type", 0);
+        indices.insert("date", 1);
+        indices.insert("subject", 2);
+        indices.insert("task", 3);
+
+        let entry = parse_row(&row, &indices).unwrap();
+        assert_eq!(entry.entry_type, "verifica");
+    }
+
+    #[test]
+    fn test_parse_row_detects_prova() {
+        let row = vec![
+            "compiti".to_string(),
+            "2025-01-16".to_string(),
+            "ITALIANO".to_string(),
+            "Prova di grammatica".to_string(),
+        ];
+
+        let mut indices = HashMap::new();
+        indices.insert("type", 0);
+        indices.insert("date", 1);
+        indices.insert("subject", 2);
+        indices.insert("task", 3);
+
+        let entry = parse_row(&row, &indices).unwrap();
+        assert_eq!(entry.entry_type, "verifica");
+    }
+
+    #[test]
+    fn test_parse_row_keeps_compiti_for_regular_homework() {
+        let row = vec![
+            "compiti".to_string(),
+            "2025-01-15".to_string(),
+            "MATEMATICA".to_string(),
+            "Esercizi pag. 100".to_string(),
+        ];
+
+        let mut indices = HashMap::new();
+        indices.insert("type", 0);
+        indices.insert("date", 1);
+        indices.insert("subject", 2);
+        indices.insert("task", 3);
+
+        let entry = parse_row(&row, &indices).unwrap();
+        assert_eq!(entry.entry_type, "compiti");
     }
 }
