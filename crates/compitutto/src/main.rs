@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use tracing::{info, Level};
+use tracing_subscriber::{fmt, EnvFilter};
 
 mod data;
 mod db;
@@ -19,6 +21,10 @@ struct Args {
     /// Output directory for generated files
     #[arg(short, long, default_value = ".", global = true)]
     output: PathBuf,
+
+    /// Log level (trace, debug, info, warn, error)
+    #[arg(long, default_value = "info", global = true)]
+    log_level: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -40,9 +46,24 @@ enum Commands {
     },
 }
 
+fn init_tracing(log_level: &str) {
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(log_level))
+        .add_directive("hyper=warn".parse().unwrap())
+        .add_directive("tower_http=warn".parse().unwrap());
+
+    fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_max_level(Level::TRACE)
+        .init();
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    init_tracing(&args.log_level);
 
     match args.command {
         // Default to serve if no command specified
@@ -56,15 +77,17 @@ async fn main() -> Result<()> {
             let entries = data::process_all_exports(&args.output)?;
             let html_path = args.output.join("index.html");
             html::generate_html(&entries, &html_path)?;
-            println!("HTML saved: {}", html_path.display());
+            info!(path = %html_path.display(), "HTML saved");
         }
         Some(Commands::Parse { file }) => {
             let entries = parser::parse_excel_xml(&file)?;
-            println!("Found {} entries in {}", entries.len(), file.display());
+            info!(count = entries.len(), file = %file.display(), "Found entries");
             for entry in &entries {
-                println!(
-                    "  {} | {} | {}",
-                    entry.date, entry.subject, entry.entry_type
+                info!(
+                    date = %entry.date,
+                    subject = %entry.subject,
+                    entry_type = %entry.entry_type,
+                    "Entry"
                 );
             }
         }

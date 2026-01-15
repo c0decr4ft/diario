@@ -97,19 +97,7 @@ impl HomeworkEntry {
 
     /// Generate a unique ID for this entry (not content-based, just unique)
     fn generate_id() -> String {
-        use std::collections::hash_map::DefaultHasher;
-        use std::time::{SystemTime, UNIX_EPOCH};
-
-        let mut hasher = DefaultHasher::new();
-        // Use current time + random-ish component for uniqueness
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        nanos.hash(&mut hasher);
-        // Add some additional entropy from the hasher's address
-        (&hasher as *const _ as usize).hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
+        uuid::Uuid::new_v4().to_string()
     }
 
     /// Generate a source ID based on date, subject, and task.
@@ -493,8 +481,28 @@ mod tests {
         assert_eq!(entry1.source_id, entry2.source_id);
         assert!(entry1.source_id.as_ref().unwrap().len() == 16); // 16 hex chars
 
-        // But different id (unique per entry)
+        // But different id (unique per entry, UUID v4 format)
         assert_ne!(entry1.id, entry2.id);
-        assert_eq!(entry1.id.len(), 16); // 16 hex chars
+        assert_eq!(entry1.id.len(), 36); // UUID format: 8-4-4-4-12
+    }
+
+    #[test]
+    fn test_rapid_id_generation_uniqueness() {
+        // Create many entries rapidly to ensure IDs are unique
+        let mut ids = std::collections::HashSet::new();
+        for i in 0..100 {
+            let entry = HomeworkEntry::new(
+                "compiti".to_string(),
+                format!("2025-01-{:02}", i % 28 + 1),
+                format!("SUBJECT_{}", i),
+                format!("Task {}", i),
+            );
+            assert!(
+                ids.insert(entry.id.clone()),
+                "Duplicate ID generated: {}",
+                entry.id
+            );
+        }
+        assert_eq!(ids.len(), 100);
     }
 }

@@ -13,6 +13,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tracing::{debug, error, info};
 
 use crate::data::{self, generate_study_sessions, is_test_or_quiz};
 use crate::db::{self, EntryUpdate};
@@ -92,18 +93,18 @@ pub fn init_server_state(output_dir: PathBuf) -> anyhow::Result<Arc<AppState>> {
     let db_path = output_dir.join("data").join("homework.db");
     let migrations_dir = get_migrations_dir();
 
-    println!("Initializing database at {}...", db_path.display());
+    info!(path = %db_path.display(), "Initializing database");
 
     // Initialize database
     let conn = db::init_db(&db_path, &migrations_dir)?;
 
     // Process any export files and import new entries
-    println!("Scanning for export files...");
+    debug!("Scanning for export files");
     match data::process_all_exports(&output_dir) {
         Ok(entries) => {
             let imported = db::import_entries(&conn, &entries)?;
             if imported > 0 {
-                println!("Imported {} new entries from exports", imported);
+                info!(count = imported, "Imported entries from exports");
             }
 
             // Generate study sessions for any tests
@@ -120,17 +121,17 @@ pub fn init_server_state(output_dir: PathBuf) -> anyhow::Result<Arc<AppState>> {
                 }
             }
             if study_sessions_created > 0 {
-                println!("Created {} study sessions", study_sessions_created);
+                info!(count = study_sessions_created, "Created study sessions");
             }
         }
         Err(e) => {
             // Not fatal - we might just have no export files yet
-            println!("Note: {}", e);
+            debug!(error = %e, "No export files processed");
         }
     }
 
     let total = db::count_entries(&conn)?;
-    println!("Database contains {} entries", total);
+    info!(count = total, "Database initialized");
 
     Ok(Arc::new(AppState::new(conn, output_dir)))
 }
@@ -159,9 +160,8 @@ pub async fn serve(port: u16, output_dir: PathBuf) -> anyhow::Result<()> {
     let app = create_router(state);
 
     let addr = create_server_addr(port);
-    println!("\nServer running at http://{}", addr);
-    println!("Watching data/ for changes...");
-    println!("Press Ctrl+C to stop\n");
+    info!(url = %format!("http://{}", addr), "Server running");
+    info!("Watching data/ for changes");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
@@ -199,24 +199,21 @@ pub enum RefreshResult {
 }
 
 impl RefreshResult {
-    /// Log the result to stdout/stderr
+    /// Log the result using tracing
     pub fn log(&self) {
         match self {
             RefreshResult::Updated {
                 old_count,
                 new_count,
             } => {
-                println!(
-                    "Updated: {} entries ({:+})",
-                    new_count,
-                    *new_count as i64 - *old_count as i64
-                );
+                let delta = *new_count as i64 - *old_count as i64;
+                info!(count = new_count, delta = delta, "Entries updated");
             }
-            RefreshResult::NoChange { .. } => {
-                println!("No new entries found");
+            RefreshResult::NoChange { count } => {
+                debug!(count = count, "No new entries found");
             }
             RefreshResult::Error(e) => {
-                eprintln!("Failed to refresh: {}", e);
+                error!(error = %e, "Failed to refresh");
             }
         }
     }
@@ -274,7 +271,7 @@ fn start_file_watcher(state: Arc<AppState>) -> anyhow::Result<()> {
     let data_dir = PathBuf::from("data");
 
     if ensure_data_dir(&data_dir)? {
-        println!("Created data/ directory");
+        info!("Created data/ directory");
     }
 
     // Create a channel to receive events
@@ -312,7 +309,7 @@ fn start_file_watcher(state: Arc<AppState>) -> anyhow::Result<()> {
     // Spawn a task to handle file change notifications
     tokio::spawn(async move {
         while rx.recv().await.is_some() {
-            println!("\nDetected changes in data/...");
+            info!("Detected changes in data/");
             let result = process_refresh(&state);
             result.log();
         }
@@ -330,7 +327,7 @@ async fn index_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse 
             Html(markup.into_string()).into_response()
         }
         Err(e) => {
-            eprintln!("Failed to get entries: {}", e);
+            error!(error = %e, "Failed to get entries");
             (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
         }
     }
@@ -342,7 +339,7 @@ async fn entries_handler(State(state): State<Arc<AppState>>) -> impl IntoRespons
     match db::get_all_entries(&conn) {
         Ok(entries) => Json(entries).into_response(),
         Err(e) => {
-            eprintln!("Failed to get entries: {}", e);
+            error!(error = %e, "Failed to get entries");
             (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
         }
     }
@@ -358,7 +355,7 @@ async fn get_entry_handler(
         Ok(Some(entry)) => Json(entry).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Entry not found").into_response(),
         Err(e) => {
-            eprintln!("Failed to get entry: {}", e);
+            error!(error = %e, id = %id, "Failed to get entry");
             (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
         }
     }
@@ -390,10 +387,11 @@ async fn create_entry_handler(
                     let _ = db::insert_entry_if_not_exists(&conn, &session);
                 }
             }
+            debug!(id = %entry.id, subject = %entry.subject, "Entry created");
             (StatusCode::CREATED, Json(entry)).into_response()
         }
         Err(e) => {
-            eprintln!("Failed to create entry: {}", e);
+            error!(error = %e, "Failed to create entry");
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create entry").into_response()
         }
     }
@@ -416,6 +414,7 @@ async fn update_entry_handler(
 
     match db::update_entry(&conn, &id, &updates) {
         Ok(true) => {
+            debug!(id = %id, "Entry updated");
             // Return the updated entry
             match db::get_entry(&conn, &id) {
                 Ok(Some(entry)) => Json(entry).into_response(),
@@ -424,7 +423,7 @@ async fn update_entry_handler(
         }
         Ok(false) => (StatusCode::NOT_FOUND, "Entry not found").into_response(),
         Err(e) => {
-            eprintln!("Failed to update entry: {}", e);
+            error!(error = %e, id = %id, "Failed to update entry");
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to update entry").into_response()
         }
     }
@@ -443,15 +442,18 @@ async fn delete_entry_handler(
     let children_count = children.len();
 
     match db::delete_entry(&conn, &id) {
-        Ok(true) => Json(DeleteResponse {
-            success: true,
-            had_children,
-            children_orphaned: children_count,
-        })
-        .into_response(),
+        Ok(true) => {
+            debug!(id = %id, had_children = had_children, "Entry deleted");
+            Json(DeleteResponse {
+                success: true,
+                had_children,
+                children_orphaned: children_count,
+            })
+            .into_response()
+        }
         Ok(false) => (StatusCode::NOT_FOUND, "Entry not found").into_response(),
         Err(e) => {
-            eprintln!("Failed to delete entry: {}", e);
+            error!(error = %e, id = %id, "Failed to delete entry");
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete entry").into_response()
         }
     }
@@ -466,7 +468,7 @@ async fn get_children_handler(
     match db::get_children(&conn, &id) {
         Ok(children) => Json(children).into_response(),
         Err(e) => {
-            eprintln!("Failed to get children: {}", e);
+            error!(error = %e, id = %id, "Failed to get children");
             (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response()
         }
     }
@@ -479,13 +481,16 @@ async fn cascade_delete_handler(
 ) -> impl IntoResponse {
     let conn = state.conn.lock().unwrap();
     match db::delete_with_children(&conn, &id) {
-        Ok(count) => Json(CascadeDeleteResponse {
-            success: count > 0,
-            deleted_count: count,
-        })
-        .into_response(),
+        Ok(count) => {
+            debug!(id = %id, deleted_count = count, "Cascade delete completed");
+            Json(CascadeDeleteResponse {
+                success: count > 0,
+                deleted_count: count,
+            })
+            .into_response()
+        }
         Err(e) => {
-            eprintln!("Failed to cascade delete: {}", e);
+            error!(error = %e, id = %id, "Failed to cascade delete");
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to delete").into_response()
         }
     }
@@ -493,7 +498,7 @@ async fn cascade_delete_handler(
 
 /// Refresh data from disk (re-process export files)
 async fn refresh_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    println!("\nManual refresh triggered...");
+    info!("Manual refresh triggered");
 
     let conn = state.conn.lock().unwrap();
 
@@ -516,15 +521,16 @@ async fn refresh_handler(State(state): State<Arc<AppState>>) -> impl IntoRespons
             }
 
             if imported > 0 || study_sessions_created > 0 {
-                println!(
-                    "Imported {} entries, created {} study sessions",
-                    imported, study_sessions_created
+                info!(
+                    imported = imported,
+                    study_sessions = study_sessions_created,
+                    "Refresh complete"
                 );
             }
             "OK"
         }
         Err(e) => {
-            eprintln!("Refresh failed: {}", e);
+            error!(error = %e, "Refresh failed");
             "ERROR"
         }
     }

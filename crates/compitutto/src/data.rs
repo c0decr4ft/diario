@@ -3,6 +3,7 @@ use chrono::NaiveDate;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use tracing::{debug, info, warn};
 
 use crate::parser;
 use crate::types::HomeworkEntry;
@@ -95,20 +96,20 @@ pub fn process_all_exports(output_dir: &Path) -> Result<Vec<HomeworkEntry>> {
         if existing_entries.is_empty() {
             anyhow::bail!("No export files found in data/ and no existing data.");
         }
-        println!("No export files found, using existing data.");
+        debug!("No export files found, using existing data");
         return Ok(existing_entries);
     }
 
     let mut new_entries: Vec<HomeworkEntry> = Vec::new();
     for file in &files {
-        println!("Processing: {}", file.display());
+        debug!(file = %file.display(), "Processing export file");
         match parser::parse_excel_xml(file) {
             Ok(entries) => {
-                println!("  Found {} entries", entries.len());
+                debug!(count = entries.len(), "Found entries");
                 new_entries.extend(entries);
             }
             Err(e) => {
-                eprintln!("  Warning: Failed to parse {}: {}", file.display(), e);
+                warn!(file = %file.display(), error = %e, "Failed to parse export file");
             }
         }
     }
@@ -117,11 +118,15 @@ pub fn process_all_exports(output_dir: &Path) -> Result<Vec<HomeworkEntry>> {
     let all_entries = merge_and_deduplicate(existing_entries, new_entries);
     let new_count = all_entries.len().saturating_sub(existing_count);
 
-    println!("Total entries: {} ({} new)", all_entries.len(), new_count);
+    info!(
+        total = all_entries.len(),
+        new = new_count,
+        "Entries processed"
+    );
 
     // Save updated JSON
     save_json(&all_entries, &json_path)?;
-    println!("Data saved: {}", json_path.display());
+    debug!(path = %json_path.display(), "Data saved");
 
     Ok(all_entries)
 }
@@ -136,7 +141,7 @@ fn load_existing_entries(path: &PathBuf) -> Result<Vec<HomeworkEntry>> {
     let entries: Vec<HomeworkEntry> =
         serde_json::from_str(&content).context("Failed to parse existing JSON")?;
 
-    println!("Loaded {} existing entries", entries.len());
+    debug!(count = entries.len(), "Loaded existing entries");
     Ok(entries)
 }
 

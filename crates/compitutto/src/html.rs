@@ -33,21 +33,32 @@ pub fn render_page(entries: &[HomeworkEntry]) -> Markup {
             }
             body {
                 div.container {
-                    h1 { "Compitutto" }
-                    div.stats {
-                        span #"total-count" { (total_count) }
-                        " entries"
+                    header.header {
+                        div.header-left {
+                            h1 { "Compitutto" }
+                            div.stats {
+                                span #"total-count" { (total_count) }
+                                " entries"
+                            }
+                        }
+                        div.view-toggle {
+                            button.view-btn.active #"list-view-btn" type="button" { "List" }
+                            button.view-btn #"calendar-view-btn" type="button" { "Calendar" }
+                        }
                     }
-                    div.homework-list #"homework-list" {
+                    div.list-view #"list-view" {
                         @if entries.is_empty() {
                             div.empty-state {
                                 p { "No homework entries found." }
                             }
                         } @else {
-                            @for (date, items) in by_date.iter() {
+                            @for (date, items) in by_date.iter().rev() {
                                 (render_date_group(date, items))
                             }
                         }
+                    }
+                    div.calendar-view.hidden #"calendar-view" {
+                        (render_calendar(entries, &by_date))
                     }
                 }
 
@@ -163,6 +174,96 @@ fn render_date_group(date: &str, items: &[&HomeworkEntry]) -> Markup {
     }
 }
 
+fn render_calendar(
+    entries: &[HomeworkEntry],
+    by_date: &BTreeMap<&str, Vec<&HomeworkEntry>>,
+) -> Markup {
+    // Get current month info (use the most recent entry's date or today)
+    let reference_date = entries
+        .iter()
+        .map(|e| &e.date)
+        .max()
+        .map(|s| s.as_str())
+        .unwrap_or("2025-01-15");
+
+    let parts: Vec<&str> = reference_date.split('-').collect();
+    let year: i32 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(2025);
+    let month: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+
+    html! {
+        div.calendar-layout {
+            div.calendar-main {
+                div.calendar-header {
+                    button.cal-nav-btn #"cal-prev" type="button" { "<" }
+                    span.cal-month-year #"cal-month-year" data-year=(year) data-month=(month) {
+                        (month_name(month)) " " (year)
+                    }
+                    button.cal-nav-btn #"cal-next" type="button" { ">" }
+                }
+                div.calendar-grid {
+                    // Day headers
+                    @for day in ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] {
+                        div.cal-day-header { (day) }
+                    }
+                }
+                div.calendar-days #"calendar-days" data-entries=(entries_to_json(by_date)) {}
+            }
+            aside.calendar-sidebar #"calendar-sidebar" {
+                div.sidebar-header {
+                    h3.sidebar-date #"sidebar-date" { "Select a day" }
+                    button.sidebar-close #"sidebar-close" type="button" { "×" }
+                }
+                div.sidebar-content #"sidebar-content" {
+                    p.sidebar-empty { "Click on a day to see its entries" }
+                }
+            }
+        }
+    }
+}
+
+fn month_name(month: u32) -> &'static str {
+    match month {
+        1 => "January",
+        2 => "February",
+        3 => "March",
+        4 => "April",
+        5 => "May",
+        6 => "June",
+        7 => "July",
+        8 => "August",
+        9 => "September",
+        10 => "October",
+        11 => "November",
+        12 => "December",
+        _ => "Unknown",
+    }
+}
+
+fn entries_to_json(by_date: &BTreeMap<&str, Vec<&HomeworkEntry>>) -> String {
+    use std::collections::HashMap;
+
+    let map: HashMap<&str, Vec<_>> = by_date
+        .iter()
+        .map(|(date, items)| {
+            let entries: Vec<_> = items
+                .iter()
+                .map(|e| {
+                    serde_json::json!({
+                        "id": e.id,
+                        "subject": e.subject,
+                        "task": e.task,
+                        "entry_type": e.entry_type,
+                        "completed": e.completed
+                    })
+                })
+                .collect();
+            (*date, entries)
+        })
+        .collect();
+
+    serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+}
+
 const CSS: &str = r#"
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
 
@@ -198,17 +299,30 @@ body::before {
 }
 
 .container {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 40px 24px 60px;
+    width: 100%;
+    padding: 30px 40px 60px;
     position: relative;
     z-index: 1;
+}
+
+/* Header styles */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 40px;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.header-left {
+    flex: 1;
 }
 
 h1 {
     color: #fff;
     font-weight: 900;
-    font-size: 4.5em;
+    font-size: 3.5em;
     letter-spacing: -0.03em;
     margin-bottom: 4px;
     text-transform: uppercase;
@@ -232,15 +346,55 @@ h1 {
     color: #888;
     font-size: 0.85em;
     font-weight: 700;
-    margin-bottom: 50px;
     padding-top: 8px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
 }
 
-.homework-list {
+/* View toggle */
+.view-toggle {
+    display: flex;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.view-btn {
+    padding: 10px 20px;
+    border: none;
+    background: transparent;
+    color: #888;
+    font-weight: 600;
+    font-size: 0.9em;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.view-btn:hover {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.view-btn.active {
+    background: linear-gradient(135deg, #ff0096, #00ffff);
+    color: #000;
+    box-shadow: 0 0 15px rgba(255, 0, 150, 0.4);
+}
+
+/* List view */
+.list-view {
     display: grid;
     gap: 50px;
+}
+
+.list-view.hidden,
+.calendar-view.hidden {
+    display: none;
 }
 
 .date-group {
@@ -609,13 +763,335 @@ dialog p {
     min-height: 80px;
 }
 
+/* Calendar view */
+.calendar-view {
+    width: 100%;
+}
+
+.calendar-layout {
+    display: flex;
+    gap: 24px;
+    min-height: 600px;
+}
+
+.calendar-main {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 24px;
+}
+
+.calendar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.cal-month-year {
+    font-size: 1.5em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.cal-nav-btn {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    width: 40px;
+    height: 40px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.2em;
+    transition: all 0.2s;
+}
+
+.cal-nav-btn:hover {
+    background: rgba(255, 0, 150, 0.2);
+    border-color: #ff0096;
+}
+
+.calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    margin-bottom: 8px;
+}
+
+.cal-day-header {
+    padding: 12px 8px;
+    text-align: center;
+    font-weight: 700;
+    font-size: 0.75em;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #888;
+}
+
+.calendar-days {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 8px;
+}
+
+.cal-day {
+    min-height: 100px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 8px;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.cal-day:hover {
+    border-color: rgba(255, 0, 150, 0.3);
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.cal-day.other-month {
+    opacity: 0.3;
+}
+
+.cal-day.today {
+    border-color: #ff0096;
+    box-shadow: 0 0 10px rgba(255, 0, 150, 0.3);
+}
+
+.cal-day.has-entries {
+    border-color: rgba(0, 255, 255, 0.4);
+}
+
+.cal-day.selected {
+    border-color: #ff0096;
+    background: rgba(255, 0, 150, 0.1);
+    box-shadow: 0 0 15px rgba(255, 0, 150, 0.3);
+}
+
+.cal-day-number {
+    font-weight: 700;
+    font-size: 0.9em;
+    margin-bottom: 6px;
+    color: #888;
+}
+
+.cal-day.today .cal-day-number {
+    color: #ff0096;
+}
+
+.cal-day.has-entries .cal-day-number {
+    color: #00ffff;
+}
+
+.cal-day.selected .cal-day-number {
+    color: #ff0096;
+}
+
+.cal-entry {
+    background: rgba(255, 0, 150, 0.15);
+    border-left: 3px solid #ff0096;
+    padding: 3px 6px;
+    margin-bottom: 3px;
+    border-radius: 4px;
+    font-size: 0.7em;
+    transition: all 0.2s;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.cal-entry.completed {
+    opacity: 0.4;
+    text-decoration: line-through;
+}
+
+.cal-entry-subject {
+    font-weight: 600;
+    color: #fff;
+}
+
+.cal-entry-more {
+    font-size: 0.65em;
+    color: #00ffff;
+    text-align: center;
+    padding: 2px;
+    cursor: pointer;
+}
+
+.cal-entry-more:hover {
+    color: #ff0096;
+}
+
+/* Calendar Sidebar */
+.calendar-sidebar {
+    width: 350px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.sidebar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 0, 150, 0.05);
+}
+
+.sidebar-date {
+    font-size: 1.1em;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+}
+
+.sidebar-close {
+    background: transparent;
+    border: none;
+    color: #888;
+    font-size: 1.5em;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: color 0.2s;
+}
+
+.sidebar-close:hover {
+    color: #ff0096;
+}
+
+.sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+}
+
+.sidebar-empty {
+    color: #666;
+    text-align: center;
+    padding: 40px 20px;
+    font-size: 0.9em;
+}
+
+.sidebar-entry {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-left: 4px solid #ff0096;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    transition: all 0.2s;
+}
+
+.sidebar-entry:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 0, 150, 0.3);
+}
+
+.sidebar-entry.completed {
+    opacity: 0.5;
+}
+
+.sidebar-entry-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.sidebar-entry-checkbox {
+    width: 20px;
+    height: 20px;
+    cursor: pointer;
+    accent-color: #ff0096;
+}
+
+.sidebar-entry-subject {
+    font-weight: 700;
+    font-size: 0.95em;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.sidebar-entry-type {
+    background: linear-gradient(135deg, #ff0096, #00ffff);
+    color: #000;
+    font-size: 0.6em;
+    padding: 2px 8px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-left: auto;
+}
+
+.sidebar-entry-task {
+    color: #ccc;
+    font-size: 0.85em;
+    line-height: 1.5;
+    margin-left: 32px;
+}
+
+.sidebar-entry.completed .sidebar-entry-task {
+    text-decoration: line-through;
+}
+
+@media (max-width: 1200px) {
+    .calendar-layout {
+        flex-direction: column;
+    }
+    
+    .calendar-sidebar {
+        width: 100%;
+        max-height: 400px;
+    }
+}
+
 @media (max-width: 768px) {
     h1 {
-        font-size: 3em;
+        font-size: 2.5em;
     }
     
     .container {
-        padding: 30px 16px 40px;
+        padding: 20px 16px 40px;
+    }
+    
+    .header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .view-toggle {
+        width: 100%;
+    }
+    
+    .view-btn {
+        flex: 1;
+        text-align: center;
+    }
+    
+    .calendar-days {
+        gap: 4px;
+    }
+    
+    .cal-day {
+        min-height: 70px;
+        padding: 4px;
+    }
+    
+    .cal-day-number {
+        font-size: 0.8em;
+    }
+    
+    .cal-entry {
+        font-size: 0.6em;
+        padding: 2px 4px;
     }
     
     .add-entry-btn {
@@ -624,6 +1100,14 @@ dialog p {
         width: 48px;
         height: 48px;
         font-size: 24px;
+    }
+    
+    .calendar-sidebar {
+        max-height: 350px;
+    }
+    
+    .sidebar-entry {
+        padding: 12px;
     }
 }
 "#;
@@ -927,6 +1411,305 @@ addEntryForm.addEventListener('submit', async (e) => {
 addEntryDialog.addEventListener('click', (e) => {
     if (e.target === addEntryDialog) addEntryDialog.close();
 });
+
+// ========== View Toggle ==========
+
+const listViewBtn = document.getElementById('list-view-btn');
+const calendarViewBtn = document.getElementById('calendar-view-btn');
+const listView = document.getElementById('list-view');
+const calendarView = document.getElementById('calendar-view');
+
+function showListView() {
+    listView.classList.remove('hidden');
+    calendarView.classList.add('hidden');
+    listViewBtn.classList.add('active');
+    calendarViewBtn.classList.remove('active');
+    localStorage.setItem('preferredView', 'list');
+}
+
+function showCalendarView() {
+    listView.classList.add('hidden');
+    calendarView.classList.remove('hidden');
+    listViewBtn.classList.remove('active');
+    calendarViewBtn.classList.add('active');
+    localStorage.setItem('preferredView', 'calendar');
+    renderCalendar();
+}
+
+listViewBtn.addEventListener('click', showListView);
+calendarViewBtn.addEventListener('click', showCalendarView);
+
+// Restore preferred view
+if (localStorage.getItem('preferredView') === 'calendar') {
+    showCalendarView();
+}
+
+// ========== Calendar ==========
+
+const calendarDays = document.getElementById('calendar-days');
+const calMonthYear = document.getElementById('cal-month-year');
+const calPrev = document.getElementById('cal-prev');
+const calNext = document.getElementById('cal-next');
+const calendarSidebar = document.getElementById('calendar-sidebar');
+const sidebarDate = document.getElementById('sidebar-date');
+const sidebarContent = document.getElementById('sidebar-content');
+const sidebarClose = document.getElementById('sidebar-close');
+
+let currentYear = parseInt(calMonthYear.dataset.year);
+let currentMonth = parseInt(calMonthYear.dataset.month);
+let selectedDate = null;
+let entriesByDate = {};
+
+try {
+    entriesByDate = JSON.parse(calendarDays.dataset.entries || '{}');
+} catch (e) {
+    console.error('Failed to parse entries:', e);
+}
+
+const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+function formatDateForSidebar(dateStr) {
+    const date = new Date(dateStr + 'T00:00:00');
+    const dayName = dayNames[date.getDay()];
+    const day = date.getDate();
+    const month = monthNames[date.getMonth()];
+    return `${dayName}, ${month} ${day}`;
+}
+
+function selectDay(dateStr) {
+    // Remove previous selection
+    document.querySelectorAll('.cal-day.selected').forEach(el => el.classList.remove('selected'));
+    
+    // Add selection to new day
+    const dayEl = document.querySelector(`.cal-day[data-date="${dateStr}"]`);
+    if (dayEl) {
+        dayEl.classList.add('selected');
+    }
+    
+    selectedDate = dateStr;
+    renderSidebar(dateStr);
+}
+
+function renderSidebar(dateStr) {
+    const entries = entriesByDate[dateStr] || [];
+    
+    sidebarDate.textContent = formatDateForSidebar(dateStr);
+    
+    if (entries.length === 0) {
+        sidebarContent.innerHTML = '<p class="sidebar-empty">No entries for this day</p>';
+        return;
+    }
+    
+    let html = '';
+    entries.forEach(entry => {
+        const completedClass = entry.completed ? ' completed' : '';
+        const checkedAttr = entry.completed ? ' checked' : '';
+        const typeHtml = entry.entry_type ? `<span class="sidebar-entry-type">${escapeHtml(entry.entry_type)}</span>` : '';
+        
+        html += `
+            <div class="sidebar-entry${completedClass}" data-entry-id="${entry.id}">
+                <div class="sidebar-entry-header">
+                    <input type="checkbox" class="sidebar-entry-checkbox" data-entry-id="${entry.id}"${checkedAttr}>
+                    <span class="sidebar-entry-subject">${escapeHtml(entry.subject)}</span>
+                    ${typeHtml}
+                </div>
+                <div class="sidebar-entry-task">${escapeHtml(entry.task)}</div>
+            </div>
+        `;
+    });
+    
+    sidebarContent.innerHTML = html;
+    
+    // Add checkbox listeners
+    sidebarContent.querySelectorAll('.sidebar-entry-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', handleSidebarCheckbox);
+    });
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function handleSidebarCheckbox(e) {
+    const entryId = e.target.dataset.entryId;
+    const isChecked = e.target.checked;
+    const entryEl = e.target.closest('.sidebar-entry');
+    
+    // Optimistic UI update
+    if (isChecked) {
+        entryEl.classList.add('completed');
+    } else {
+        entryEl.classList.remove('completed');
+    }
+    
+    // Update local data
+    if (selectedDate && entriesByDate[selectedDate]) {
+        const entry = entriesByDate[selectedDate].find(e => e.id === entryId);
+        if (entry) {
+            entry.completed = isChecked;
+        }
+    }
+    
+    // Re-render calendar day to show completion
+    renderCalendar();
+    if (selectedDate) {
+        const dayEl = document.querySelector(`.cal-day[data-date="${selectedDate}"]`);
+        if (dayEl) dayEl.classList.add('selected');
+    }
+    
+    // Persist to API
+    try {
+        const response = await fetch(`/api/entries/${entryId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ completed: isChecked })
+        });
+        
+        if (!response.ok) {
+            // Revert on error
+            e.target.checked = !isChecked;
+            entryEl.classList.toggle('completed');
+            if (selectedDate && entriesByDate[selectedDate]) {
+                const entry = entriesByDate[selectedDate].find(e => e.id === entryId);
+                if (entry) entry.completed = !isChecked;
+            }
+            console.error('Failed to update completion state');
+        }
+    } catch (error) {
+        // Revert on error
+        e.target.checked = !isChecked;
+        entryEl.classList.toggle('completed');
+        console.error('Error updating completion:', error);
+    }
+}
+
+function renderCalendar() {
+    const year = currentYear;
+    const month = currentMonth;
+    
+    calMonthYear.textContent = `${monthNames[month - 1]} ${year}`;
+    
+    // Get first day of month and number of days
+    const firstDay = new Date(year, month - 1, 1);
+    const lastDay = new Date(year, month, 0);
+    const daysInMonth = lastDay.getDate();
+    
+    // Get the day of week for the first day (0 = Sunday, adjust for Monday start)
+    let startDayOfWeek = firstDay.getDay();
+    startDayOfWeek = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1; // Monday = 0
+    
+    // Get today's date for highlighting
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    // Build calendar HTML
+    let html = '';
+    
+    // Previous month days
+    const prevMonth = month === 1 ? 12 : month - 1;
+    const prevYear = month === 1 ? year - 1 : year;
+    const daysInPrevMonth = new Date(prevYear, prevMonth, 0).getDate();
+    
+    for (let i = startDayOfWeek - 1; i >= 0; i--) {
+        const day = daysInPrevMonth - i;
+        const dateStr = `${prevYear}-${String(prevMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        html += renderCalendarDay(day, dateStr, true);
+    }
+    
+    // Current month days
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        const isToday = dateStr === todayStr;
+        const isSelected = dateStr === selectedDate;
+        html += renderCalendarDay(day, dateStr, false, isToday, isSelected);
+    }
+    
+    // Next month days to fill the grid
+    const totalCells = Math.ceil((startDayOfWeek + daysInMonth) / 7) * 7;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    
+    for (let day = 1; day <= totalCells - startDayOfWeek - daysInMonth; day++) {
+        const dateStr = `${nextYear}-${String(nextMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        html += renderCalendarDay(day, dateStr, true);
+    }
+    
+    calendarDays.innerHTML = html;
+    
+    // Add click listeners to days
+    calendarDays.querySelectorAll('.cal-day').forEach(dayEl => {
+        dayEl.addEventListener('click', () => {
+            selectDay(dayEl.dataset.date);
+        });
+    });
+}
+
+function renderCalendarDay(day, dateStr, isOtherMonth, isToday = false, isSelected = false) {
+    const entries = entriesByDate[dateStr] || [];
+    const hasEntries = entries.length > 0;
+    
+    let classes = 'cal-day';
+    if (isOtherMonth) classes += ' other-month';
+    if (isToday) classes += ' today';
+    if (hasEntries) classes += ' has-entries';
+    if (isSelected) classes += ' selected';
+    
+    let html = `<div class="${classes}" data-date="${dateStr}">`;
+    html += `<div class="cal-day-number">${day}</div>`;
+    
+    // Show up to 2 entries, then a "+N more" indicator
+    const maxEntries = 2;
+    entries.slice(0, maxEntries).forEach(entry => {
+        const completedClass = entry.completed ? ' completed' : '';
+        html += `<div class="cal-entry${completedClass}">`;
+        html += `<span class="cal-entry-subject">${escapeHtml(entry.subject)}</span>`;
+        html += '</div>';
+    });
+    
+    if (entries.length > maxEntries) {
+        html += `<div class="cal-entry-more">+${entries.length - maxEntries} more</div>`;
+    }
+    
+    html += '</div>';
+    return html;
+}
+
+sidebarClose.addEventListener('click', () => {
+    selectedDate = null;
+    document.querySelectorAll('.cal-day.selected').forEach(el => el.classList.remove('selected'));
+    sidebarDate.textContent = 'Select a day';
+    sidebarContent.innerHTML = '<p class="sidebar-empty">Click on a day to see its entries</p>';
+});
+
+calPrev.addEventListener('click', () => {
+    currentMonth--;
+    if (currentMonth < 1) {
+        currentMonth = 12;
+        currentYear--;
+    }
+    renderCalendar();
+});
+
+calNext.addEventListener('click', () => {
+    currentMonth++;
+    if (currentMonth > 12) {
+        currentMonth = 1;
+        currentYear++;
+    }
+    renderCalendar();
+});
+
+// Initial render if calendar view is active
+if (!calendarView.classList.contains('hidden')) {
+    renderCalendar();
+}
 "#;
 
 #[cfg(test)]
@@ -1437,5 +2220,243 @@ mod tests {
         let html = render_page(&entries).into_string();
 
         assert!(html.contains(".delete-btn"));
+    }
+
+    // ========== View toggle tests ==========
+
+    #[test]
+    fn test_render_page_has_view_toggle() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("view-toggle"));
+        assert!(html.contains("list-view-btn"));
+        assert!(html.contains("calendar-view-btn"));
+    }
+
+    #[test]
+    fn test_render_page_has_list_view() {
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains(r#"id="list-view""#));
+        assert!(html.contains(r#"class="list-view""#));
+    }
+
+    #[test]
+    fn test_render_page_has_calendar_view() {
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains(r#"id="calendar-view""#));
+        assert!(html.contains("calendar-view"));
+        assert!(html.contains("calendar-layout"));
+        assert!(html.contains("calendar-main"));
+        assert!(html.contains("calendar-sidebar"));
+    }
+
+    #[test]
+    fn test_render_page_calendar_view_hidden_by_default() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains(r#"class="calendar-view hidden""#));
+    }
+
+    #[test]
+    fn test_render_page_has_calendar_navigation() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("cal-prev"));
+        assert!(html.contains("cal-next"));
+        assert!(html.contains("cal-month-year"));
+    }
+
+    #[test]
+    fn test_render_page_has_calendar_day_headers() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("Mon"));
+        assert!(html.contains("Tue"));
+        assert!(html.contains("Wed"));
+        assert!(html.contains("Thu"));
+        assert!(html.contains("Fri"));
+        assert!(html.contains("Sat"));
+        assert!(html.contains("Sun"));
+    }
+
+    #[test]
+    fn test_render_page_calendar_contains_entries_data() {
+        let entries = vec![
+            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
+        ];
+        let html = render_page(&entries).into_string();
+
+        // Calendar should have data-entries attribute with JSON
+        assert!(html.contains("data-entries="));
+        assert!(html.contains("MATEMATICA"));
+        assert!(html.contains("ITALIANO"));
+    }
+
+    #[test]
+    fn test_render_page_css_has_view_toggle_styling() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains(".view-toggle"));
+        assert!(html.contains(".view-btn"));
+        assert!(html.contains(".view-btn.active"));
+    }
+
+    #[test]
+    fn test_render_page_css_has_calendar_styling() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains(".calendar-view"));
+        assert!(html.contains(".calendar-main"));
+        assert!(html.contains(".cal-day"));
+        assert!(html.contains(".cal-entry"));
+    }
+
+    #[test]
+    fn test_render_page_javascript_has_view_toggle() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("showListView"));
+        assert!(html.contains("showCalendarView"));
+        assert!(html.contains("localStorage"));
+    }
+
+    #[test]
+    fn test_render_page_javascript_has_calendar_rendering() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("renderCalendar"));
+        assert!(html.contains("renderCalendarDay"));
+        assert!(html.contains("calPrev"));
+        assert!(html.contains("calNext"));
+    }
+
+    // ========== Reverse chronological order tests ==========
+
+    #[test]
+    fn test_render_page_dates_in_reverse_chronological_order() {
+        let entries = vec![
+            make_entry("compiti", "2025-01-10", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-20", "INGLESE", "Task 3"),
+        ];
+        let html = render_page(&entries).into_string();
+
+        // Find positions of dates in the HTML
+        let pos_10 = html.find("2025-01-10").unwrap();
+        let pos_15 = html.find("2025-01-15").unwrap();
+        let pos_20 = html.find("2025-01-20").unwrap();
+
+        // Newest date (20) should appear first, then 15, then 10
+        assert!(
+            pos_20 < pos_15,
+            "2025-01-20 should appear before 2025-01-15"
+        );
+        assert!(
+            pos_15 < pos_10,
+            "2025-01-15 should appear before 2025-01-10"
+        );
+    }
+
+    // ========== Helper function tests ==========
+
+    #[test]
+    fn test_month_name() {
+        assert_eq!(month_name(1), "January");
+        assert_eq!(month_name(6), "June");
+        assert_eq!(month_name(12), "December");
+        assert_eq!(month_name(0), "Unknown");
+        assert_eq!(month_name(13), "Unknown");
+    }
+
+    #[test]
+    fn test_entries_to_json() {
+        let entries = [
+            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+        ];
+        let refs: Vec<&HomeworkEntry> = entries.iter().collect();
+        let mut by_date: BTreeMap<&str, Vec<&HomeworkEntry>> = BTreeMap::new();
+        by_date.insert("2025-01-15", refs);
+
+        let json = entries_to_json(&by_date);
+
+        assert!(json.contains("2025-01-15"));
+        assert!(json.contains("MATEMATICA"));
+        assert!(json.contains("ITALIANO"));
+        assert!(json.contains("Task 1"));
+        assert!(json.contains("Task 2"));
+    }
+
+    #[test]
+    fn test_entries_to_json_empty() {
+        let by_date: BTreeMap<&str, Vec<&HomeworkEntry>> = BTreeMap::new();
+        let json = entries_to_json(&by_date);
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn test_render_calendar_basic() {
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let refs: Vec<&HomeworkEntry> = entries.iter().collect();
+        let mut by_date: BTreeMap<&str, Vec<&HomeworkEntry>> = BTreeMap::new();
+        by_date.insert("2025-01-15", refs);
+
+        let html = render_calendar(&entries, &by_date).into_string();
+
+        assert!(html.contains("calendar-layout"));
+        assert!(html.contains("calendar-main"));
+        assert!(html.contains("calendar-header"));
+        assert!(html.contains("calendar-grid"));
+        assert!(html.contains("calendar-days"));
+        assert!(html.contains("calendar-sidebar"));
+    }
+
+    #[test]
+    fn test_render_calendar_month_from_entries() {
+        let entries = vec![make_entry("compiti", "2025-03-15", "MATEMATICA", "Task 1")];
+        let refs: Vec<&HomeworkEntry> = entries.iter().collect();
+        let mut by_date: BTreeMap<&str, Vec<&HomeworkEntry>> = BTreeMap::new();
+        by_date.insert("2025-03-15", refs);
+
+        let html = render_calendar(&entries, &by_date).into_string();
+
+        // Should show March 2025 based on the entry date
+        assert!(html.contains("March"));
+        assert!(html.contains("2025"));
+    }
+
+    // ========== Full width layout tests ==========
+
+    #[test]
+    fn test_render_page_has_header_structure() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("header"));
+        assert!(html.contains("header-left"));
+    }
+
+    #[test]
+    fn test_render_page_css_has_full_width_container() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        // Check that container is full width (no max-width restriction)
+        // The container should have width: 100% and padding but no max-width
+        assert!(html.contains(".container"));
+        assert!(html.contains("width: 100%"));
     }
 }

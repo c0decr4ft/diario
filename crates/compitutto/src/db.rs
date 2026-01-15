@@ -9,6 +9,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;
+use tracing::{debug, info};
 
 use crate::types::HomeworkEntry;
 
@@ -22,7 +23,7 @@ pub fn init_db(db_path: &Path, migrations_dir: &Path) -> Result<Connection> {
 
     let count = run_migrations(&conn, migrations_dir)?;
     if count > 0 {
-        println!("Applied {} migration(s)", count);
+        info!(count = count, "Applied migrations");
     }
 
     Ok(conn)
@@ -100,7 +101,7 @@ pub fn run_migrations(conn: &Connection, migrations_dir: &Path) -> Result<usize>
             [&version],
         )?;
 
-        println!("Applied migration: {}", version);
+        debug!(version = %version, "Applied migration");
         applied += 1;
     }
 

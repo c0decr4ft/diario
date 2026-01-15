@@ -24,7 +24,6 @@ pub fn parse_excel_xml(path: &Path) -> Result<Vec<HomeworkEntry>> {
 
     // First row is headers
     let headers = &rows[0];
-    println!("Found columns: {:?}", headers);
 
     // Map column indices
     let col_indices = map_columns(headers);
