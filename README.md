@@ -29,7 +29,7 @@ cargo run --release
 
 This will:
 - Scan `data/` for export files
-- Merge entries into `homework.json`
+- Import entries into `data/homework.db` (SQLite)
 - Start a web server at http://localhost:8080
 - Watch for new files and auto-update
 
@@ -64,7 +64,7 @@ Files are deduplicated automatically, so you can drop overlapping exports withou
 
 ## Output
 
-- `homework.json` - All entries as JSON
+- `data/homework.db` - SQLite database with all entries
 - `index.html` - Generated when using `build` command
 - `data/` - Place export files here
 

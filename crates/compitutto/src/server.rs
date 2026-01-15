@@ -100,7 +100,7 @@ pub fn init_server_state(output_dir: PathBuf) -> anyhow::Result<Arc<AppState>> {
 
     // Process any export files and import new entries
     debug!("Scanning for export files");
-    match data::process_all_exports(&output_dir) {
+    match data::parse_all_exports() {
         Ok(entries) => {
             let imported = db::import_entries(&conn, &entries)?;
             if imported > 0 {
@@ -228,7 +228,7 @@ pub fn process_refresh(state: &AppState) -> RefreshResult {
 
     let old_count = db::count_entries(&conn).unwrap_or(0);
 
-    match data::process_all_exports(&state.output_dir) {
+    match data::parse_all_exports() {
         Ok(entries) => {
             let imported = db::import_entries(&conn, &entries).unwrap_or(0);
 
@@ -502,7 +502,7 @@ async fn refresh_handler(State(state): State<Arc<AppState>>) -> impl IntoRespons
 
     let conn = state.conn.lock().unwrap();
 
-    match data::process_all_exports(&state.output_dir) {
+    match data::parse_all_exports() {
         Ok(entries) => {
             let imported = db::import_entries(&conn, &entries).unwrap_or(0);
 
@@ -586,6 +586,24 @@ mod tests {
         let (temp_dir, conn) = setup_test_db(&entries);
         let state = Arc::new(AppState::new(conn, temp_dir.path().to_path_buf()));
         (temp_dir, state)
+    }
+
+    /// Helper to create a test Excel XML file
+    fn create_test_export(path: &std::path::Path, entries: &[(&str, &str, &str, &str)]) {
+        let mut rows = String::from(
+            r#"<Row><Cell><Data ss:Type="String">tipo</Data></Cell><Cell><Data ss:Type="String">data_inizio</Data></Cell><Cell><Data ss:Type="String">materia</Data></Cell><Cell><Data ss:Type="String">nota</Data></Cell></Row>"#,
+        );
+        for (tipo, date, subject, task) in entries {
+            rows.push_str(&format!(
+                r#"<Row><Cell><Data ss:Type="String">{}</Data></Cell><Cell><Data ss:Type="String">{}</Data></Cell><Cell><Data ss:Type="String">{}</Data></Cell><Cell><Data ss:Type="String">{}</Data></Cell></Row>"#,
+                tipo, date, subject, task
+            ));
+        }
+        let xml = format!(
+            r#"<?xml version="1.0"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Table1"><Table>{}</Table></Worksheet></Workbook>"#,
+            rows
+        );
+        std::fs::write(path, xml).unwrap();
     }
 
     /// Helper to get response body as string
@@ -839,7 +857,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_refresh_handler_with_existing_json() {
+    async fn test_refresh_handler_with_export_file() {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir(&data_dir).unwrap();
@@ -853,10 +871,11 @@ mod tests {
         )
         .unwrap();
 
-        // Create existing homework.json
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-        let json = serde_json::to_string(&entries).unwrap();
-        std::fs::write(temp_dir.path().join("homework.json"), json).unwrap();
+        // Create export file
+        create_test_export(
+            &data_dir.join("export_test.xls"),
+            &[("compiti", "2025-01-15", "MATEMATICA", "Task 1")],
+        );
 
         let db_path = data_dir.join("homework.db");
         let conn = db::init_db(&db_path, &migrations_dir).unwrap();
@@ -1095,10 +1114,11 @@ mod tests {
         let conn = db::init_db(&db_path, &migrations_dir).unwrap();
         let state = AppState::new(conn, temp_dir.path().to_path_buf());
 
-        // Create homework.json with one entry
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-        let json = serde_json::to_string(&entries).unwrap();
-        std::fs::write(temp_dir.path().join("homework.json"), json).unwrap();
+        // Create export file with one entry
+        create_test_export(
+            &data_dir.join("export_test.xls"),
+            &[("compiti", "2025-01-15", "MATEMATICA", "Task 1")],
+        );
 
         let _lock = DIR_LOCK.lock().unwrap();
         let original_dir = std::env::current_dir().unwrap();
@@ -1134,18 +1154,17 @@ mod tests {
         )
         .unwrap();
 
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        // Create export file
+        create_test_export(
+            &data_dir.join("export_test.xls"),
+            &[("compiti", "2025-01-15", "MATEMATICA", "Task 1")],
+        );
 
-        // Create homework.json
-        let json = serde_json::to_string(&entries).unwrap();
-        std::fs::write(temp_dir.path().join("homework.json"), json).unwrap();
-
-        // Create database with same entries
+        // Create database with same entries already imported
         let db_path = data_dir.join("homework.db");
         let conn = db::init_db(&db_path, &migrations_dir).unwrap();
-        for entry in &entries {
-            db::insert_entry(&conn, entry).unwrap();
-        }
+        let entry = make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1");
+        db::insert_entry(&conn, &entry).unwrap();
         let state = AppState::new(conn, temp_dir.path().to_path_buf());
 
         let _lock = DIR_LOCK.lock().unwrap();
@@ -1169,7 +1188,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir(&data_dir).unwrap();
-        // No homework.json - will cause error
+        // No export files - will cause error
 
         let migrations_dir = temp_dir.path().join("migrations");
         std::fs::create_dir(&migrations_dir).unwrap();

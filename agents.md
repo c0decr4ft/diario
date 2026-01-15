@@ -7,6 +7,7 @@ This document provides guidance for AI agents working on this codebase.
 Compitutto is a Rust application that parses homework calendar exports (Excel XML format) and generates a web view. It features:
 
 - Excel XML (SpreadsheetML) parsing
+- SQLite database for persistent storage
 - Data deduplication and merging
 - HTML generation with maud templating
 - Web server with file watching (axum + notify)
@@ -20,11 +21,14 @@ crates/compitutto/
 │   ├── main.rs      # CLI entry point (clap)
 │   ├── types.rs     # HomeworkEntry struct
 │   ├── parser.rs    # Excel XML parsing
-│   ├── data.rs      # Data processing, merging, JSON I/O
+│   ├── data.rs      # Data processing, merging, study session generation
+│   ├── db.rs        # SQLite database operations
 │   ├── html.rs      # HTML generation (maud)
 │   └── server.rs    # Web server (axum)
+├── db/
+│   └── migrations/  # SQL migration files
 ├── Cargo.toml
-data/                # Export files (export_*.xls)
+data/                # Export files (export_*.xls) and homework.db
 justfile             # Task runner commands
 ```
 
@@ -191,9 +195,9 @@ The parser expects SpreadsheetML format with these column headers (case-insensit
 
 1. Export files placed in `data/export_*.xls`
 2. `process_all_exports()` finds and parses all exports
-3. New entries merged with existing `homework.json`
-4. Duplicates removed based on dedup_key
-5. Results sorted by date and saved
+3. New entries imported into SQLite database via `db::import_entries()`
+4. Duplicates detected via `source_id` field (entries with same source_id are skipped)
+5. Results sorted by date and position when retrieved
 
 ## File Watching
 

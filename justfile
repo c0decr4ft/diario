@@ -25,8 +25,10 @@ status:
     @echo "Export files in data/:"
     @ls -lh data/export_*.xls* 2>/dev/null || echo "  (none)"
     @echo ""
-    @if [ -f homework.json ]; then \
-        echo "homework.json: $$(grep -c '"date"' homework.json 2>/dev/null || echo 0) entries"; \
+    @if [ -f data/homework.db ]; then \
+        echo "Database: $$(sqlite3 data/homework.db 'SELECT COUNT(*) FROM entries' 2>/dev/null || echo 0) entries"; \
+    else \
+        echo "Database: not created yet"; \
     fi
 
 # Clean build artifacts

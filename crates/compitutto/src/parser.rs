@@ -272,7 +272,7 @@ fn parse_row(row: &[String], col_indices: &HashMap<&'static str, usize>) -> Opti
 
     let entry_type = get_col("type");
     let date = normalize_date(&get_col("date"));
-    let subject = get_col("subject");
+    let mut subject = get_col("subject");
     let task = get_col("task");
 
     // Only include entries with meaningful data
@@ -280,7 +280,115 @@ fn parse_row(row: &[String], col_indices: &HashMap<&'static str, usize>) -> Opti
         return None;
     }
 
+    // If subject is empty, try to extract it from the task text
+    if subject.is_empty() {
+        if let Some(extracted) = extract_subject_from_task(&task) {
+            subject = extracted;
+        }
+    }
+
     Some(HomeworkEntry::new(entry_type, date, subject, task))
+}
+
+/// Known subjects that can be extracted from task text
+const KNOWN_SUBJECTS: &[(&str, &str)] = &[
+    // Italian subject names -> canonical form
+    ("matematica", "MATEMATICA"),
+    ("aritmetica", "MATEMATICA"),
+    ("geometria", "MATEMATICA"),
+    ("italiano", "ITALIANO"),
+    ("antologia", "ITALIANO"),
+    ("storia", "STORIA"),
+    ("geografia", "GEOGRAFIA"),
+    ("inglese", "LINGUA INGLESE"),
+    ("english", "LINGUA INGLESE"),
+    ("verbi irregolari", "LINGUA INGLESE"), // English irregular verbs
+    ("tedesco", "SECONDA LINGUA COMUNITARIA"),
+    ("deutsch", "SECONDA LINGUA COMUNITARIA"),
+    ("arte", "ARTE E IMMAGINE"),
+    ("disegno", "ARTE E IMMAGINE"),
+    ("tecnologia", "TECNOLOGIA"),
+    ("proiezioni ortogonali", "TECNOLOGIA"),
+    ("scienze", "SCIENZE"),
+    ("lavoisier", "SCIENZE"), // Lavoisier's law = chemistry/science
+    ("musica", "MUSICA"),
+    ("ed. fisica", "EDUCAZIONE FISICA"),
+    ("educazione fisica", "EDUCAZIONE FISICA"),
+    ("religione", "RELIGIONE"),
+    ("ed. civica", "EDUCAZIONE CIVICA"),
+    ("educazione civica", "EDUCAZIONE CIVICA"),
+];
+
+/// Try to extract a subject from the task text
+///
+/// Looks for patterns like "verifica di SUBJECT", "test di SUBJECT", etc.
+pub fn extract_subject_from_task(task: &str) -> Option<String> {
+    let task_lower = task.to_lowercase();
+
+    // Pattern 1: "verifica/test/interrogazione di/su SUBJECT"
+    // e.g., "Verifica di matematica", "test di storia"
+    let prefixes = [
+        "verifica di ",
+        "verifica su ",
+        "test di ",
+        "test su ",
+        "interrogazione di ",
+        "interrogazione su ",
+        "prova di ",
+        "prova su ",
+        "esame di ",
+        "esame su ",
+    ];
+
+    for prefix in prefixes {
+        if let Some(pos) = task_lower.find(prefix) {
+            let after_prefix = &task_lower[pos + prefix.len()..];
+            // Look for a known subject in what follows
+            for (keyword, canonical) in KNOWN_SUBJECTS {
+                if after_prefix.starts_with(keyword) {
+                    return Some(canonical.to_string());
+                }
+            }
+        }
+    }
+
+    // Pattern 2: Check if task starts with a subject name followed by colon
+    // e.g., "Geometria: pag. 293..."
+    for (keyword, canonical) in KNOWN_SUBJECTS {
+        if task_lower.starts_with(keyword) {
+            // Check if followed by colon or space
+            let after = &task_lower[keyword.len()..];
+            if after.starts_with(':') || after.starts_with(' ') {
+                return Some(canonical.to_string());
+            }
+        }
+    }
+
+    // Pattern 3: Look for subject keywords anywhere in the text
+    // but only if they appear in a context suggesting it's the subject
+    // e.g., "verifica ed. civica" or "portare libro di storia"
+    for (keyword, canonical) in KNOWN_SUBJECTS {
+        if task_lower.contains(keyword) {
+            // Additional heuristics to avoid false positives
+            // Only match if it looks like a test/assignment context
+            let test_context = task_lower.contains("verifica")
+                || task_lower.contains("test")
+                || task_lower.contains("interrogazione")
+                || task_lower.contains("prova")
+                || task_lower.contains("portare")
+                || task_lower.contains("libro di")
+                || task_lower.contains("quaderno")
+                || task_lower.contains("scritto")
+                || task_lower.contains("in inglese")
+                || task_lower.contains("attività");
+
+            if test_context {
+                return Some(canonical.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 /// Normalize date to YYYY-MM-DD format
@@ -988,5 +1096,156 @@ xmlns:html="http://www.w3.org/TR/REC-html40">
         assert_eq!(entries[0].date, "2025-12-01");
         assert_eq!(entries[0].subject, "SECONDA LINGUA COMUNITARIA");
         assert_eq!(entries[0].task, "Ü 15 auf Seite 118");
+    }
+
+    // ========== extract_subject_from_task tests ==========
+
+    #[test]
+    fn test_extract_subject_verifica_di() {
+        assert_eq!(
+            extract_subject_from_task("Verifica di matematica"),
+            Some("MATEMATICA".to_string())
+        );
+        assert_eq!(
+            extract_subject_from_task("VERIFICA DI STORIA"),
+            Some("STORIA".to_string())
+        );
+        assert_eq!(
+            extract_subject_from_task("verifica di geografia sui fiumi"),
+            Some("GEOGRAFIA".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_test_di() {
+        assert_eq!(
+            extract_subject_from_task("Test di inglese unit 3"),
+            Some("LINGUA INGLESE".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_interrogazione() {
+        assert_eq!(
+            extract_subject_from_task("Interrogazione di storia cap 5"),
+            Some("STORIA".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_aritmetica_geometria() {
+        // Both map to MATEMATICA
+        assert_eq!(
+            extract_subject_from_task("Verifica di aritmetica"),
+            Some("MATEMATICA".to_string())
+        );
+        assert_eq!(
+            extract_subject_from_task("Verifica di geometria"),
+            Some("MATEMATICA".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_tedesco() {
+        assert_eq!(
+            extract_subject_from_task("Verifica scritta di tedesco"),
+            Some("SECONDA LINGUA COMUNITARIA".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_ed_civica() {
+        assert_eq!(
+            extract_subject_from_task("verifica ed. civica sulla costituzione"),
+            Some("EDUCAZIONE CIVICA".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_portare_libro() {
+        assert_eq!(
+            extract_subject_from_task("Portare libro di storia"),
+            Some("STORIA".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_no_match() {
+        // No test context, shouldn't match
+        assert_eq!(extract_subject_from_task("Completare gli esercizi"), None);
+        // No known subject
+        assert_eq!(extract_subject_from_task("Verifica di filosofia"), None);
+    }
+
+    #[test]
+    fn test_extract_subject_starts_with_colon() {
+        assert_eq!(
+            extract_subject_from_task("Geometria: pag. 293 n° 107"),
+            Some("MATEMATICA".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_verbi_irregolari() {
+        assert_eq!(
+            extract_subject_from_task("Test scritto sui verbi irregolari"),
+            Some("LINGUA INGLESE".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_in_inglese() {
+        assert_eq!(
+            extract_subject_from_task("Scrivere lettera in inglese"),
+            Some("LINGUA INGLESE".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_subject_lavoisier() {
+        assert_eq!(
+            extract_subject_from_task("Attività di laboratorio: ripassare la legge di lavoisier"),
+            Some("SCIENZE".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_row_extracts_subject_when_empty() {
+        let row = vec![
+            "compiti".to_string(),
+            "2025-01-15".to_string(),
+            "".to_string(), // Empty subject
+            "Verifica di matematica (aritmetica)".to_string(),
+        ];
+
+        let mut indices = HashMap::new();
+        indices.insert("type", 0);
+        indices.insert("date", 1);
+        indices.insert("subject", 2);
+        indices.insert("task", 3);
+
+        let entry = parse_row(&row, &indices).unwrap();
+        assert_eq!(entry.subject, "MATEMATICA");
+    }
+
+    #[test]
+    fn test_parse_row_keeps_existing_subject() {
+        // When subject is provided, don't override it
+        let row = vec![
+            "compiti".to_string(),
+            "2025-01-15".to_string(),
+            "ITALIANO".to_string(),
+            "Verifica di matematica".to_string(), // Task mentions different subject
+        ];
+
+        let mut indices = HashMap::new();
+        indices.insert("type", 0);
+        indices.insert("date", 1);
+        indices.insert("subject", 2);
+        indices.insert("task", 3);
+
+        let entry = parse_row(&row, &indices).unwrap();
+        // Should keep the original subject, not extract from task
+        assert_eq!(entry.subject, "ITALIANO");
     }
 }

@@ -1,8 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use chrono::NaiveDate;
-use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
 use crate::parser;
@@ -81,32 +80,24 @@ fn compute_study_session_id(parent_id: &str, days_before: usize) -> String {
     format!("study_{:016x}", hasher.finish())
 }
 
-/// Process all export files and merge with existing data
-pub fn process_all_exports(output_dir: &Path) -> Result<Vec<HomeworkEntry>> {
-    let json_path = output_dir.join("homework.json");
-
-    // Load existing entries
-    let existing_entries = load_existing_entries(&json_path).unwrap_or_default();
-    let existing_count = existing_entries.len();
-
-    // Find and process all export files
+/// Parse all export files and return the entries.
+///
+/// This function only parses files - deduplication is handled by the database
+/// via the `source_id` field when entries are imported.
+pub fn parse_all_exports() -> Result<Vec<HomeworkEntry>> {
     let files = find_all_exports()?;
 
     if files.is_empty() {
-        if existing_entries.is_empty() {
-            anyhow::bail!("No export files found in data/ and no existing data.");
-        }
-        debug!("No export files found, using existing data");
-        return Ok(existing_entries);
+        anyhow::bail!("No export files found in data/");
     }
 
-    let mut new_entries: Vec<HomeworkEntry> = Vec::new();
+    let mut entries: Vec<HomeworkEntry> = Vec::new();
     for file in &files {
         debug!(file = %file.display(), "Processing export file");
         match parser::parse_excel_xml(file) {
-            Ok(entries) => {
-                debug!(count = entries.len(), "Found entries");
-                new_entries.extend(entries);
+            Ok(parsed) => {
+                debug!(count = parsed.len(), "Found entries");
+                entries.extend(parsed);
             }
             Err(e) => {
                 warn!(file = %file.display(), error = %e, "Failed to parse export file");
@@ -114,34 +105,12 @@ pub fn process_all_exports(output_dir: &Path) -> Result<Vec<HomeworkEntry>> {
         }
     }
 
-    // Merge and deduplicate
-    let all_entries = merge_and_deduplicate(existing_entries, new_entries);
-    let new_count = all_entries.len().saturating_sub(existing_count);
-
     info!(
-        total = all_entries.len(),
-        new = new_count,
-        "Entries processed"
+        total = entries.len(),
+        files = files.len(),
+        "Parsed export files"
     );
 
-    // Save updated JSON
-    save_json(&all_entries, &json_path)?;
-    debug!(path = %json_path.display(), "Data saved");
-
-    Ok(all_entries)
-}
-
-/// Load existing entries from JSON file
-fn load_existing_entries(path: &PathBuf) -> Result<Vec<HomeworkEntry>> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-
-    let content = std::fs::read_to_string(path).context("Failed to read existing JSON")?;
-    let entries: Vec<HomeworkEntry> =
-        serde_json::from_str(&content).context("Failed to parse existing JSON")?;
-
-    debug!(count = entries.len(), "Loaded existing entries");
     Ok(entries)
 }
 
@@ -167,42 +136,6 @@ fn find_all_exports() -> Result<Vec<PathBuf>> {
 
     files.sort();
     Ok(files)
-}
-
-/// Merge new entries with existing, removing duplicates
-fn merge_and_deduplicate(
-    existing: Vec<HomeworkEntry>,
-    new: Vec<HomeworkEntry>,
-) -> Vec<HomeworkEntry> {
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut result: Vec<HomeworkEntry> = Vec::new();
-
-    // Add existing entries first
-    for entry in existing {
-        let key = entry.dedup_key();
-        if seen.insert(key) {
-            result.push(entry);
-        }
-    }
-
-    // Add new entries if not duplicates
-    for entry in new {
-        let key = entry.dedup_key();
-        if seen.insert(key) {
-            result.push(entry);
-        }
-    }
-
-    // Sort by date
-    result.sort_by(|a, b| a.date.cmp(&b.date));
-
-    result
-}
-
-fn save_json(entries: &[HomeworkEntry], path: &PathBuf) -> Result<()> {
-    let json = serde_json::to_string_pretty(entries)?;
-    std::fs::write(path, json)?;
-    Ok(())
 }
 
 #[cfg(test)]
@@ -236,140 +169,6 @@ mod tests {
         let result = f();
         std::env::set_current_dir(original_dir).unwrap();
         result
-    }
-
-    // ========== merge_and_deduplicate tests ==========
-
-    #[test]
-    fn test_merge_empty_lists() {
-        let result = merge_and_deduplicate(vec![], vec![]);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_merge_existing_only() {
-        let existing = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
-        ];
-        let result = merge_and_deduplicate(existing, vec![]);
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn test_merge_new_only() {
-        let new = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
-        ];
-        let result = merge_and_deduplicate(vec![], new);
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn test_merge_no_duplicates() {
-        let existing = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-        let new = vec![make_entry("nota", "2025-01-16", "ITALIANO", "Task 2")];
-        let result = merge_and_deduplicate(existing, new);
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn test_merge_removes_duplicates() {
-        let existing = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-        let new = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
-        ];
-        let result = merge_and_deduplicate(existing, new);
-        assert_eq!(result.len(), 2);
-    }
-
-    #[test]
-    fn test_merge_keeps_existing_over_new() {
-        let existing = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-        let new = vec![make_entry("nota", "2025-01-15", "MATEMATICA", "Task 1")];
-        let result = merge_and_deduplicate(existing, new);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].entry_type, "compiti");
-    }
-
-    #[test]
-    fn test_merge_sorts_by_date() {
-        let existing = vec![make_entry("compiti", "2025-01-20", "MATEMATICA", "Task 3")];
-        let new = vec![
-            make_entry("nota", "2025-01-10", "ITALIANO", "Task 1"),
-            make_entry("compiti", "2025-01-15", "INGLESE", "Task 2"),
-        ];
-        let result = merge_and_deduplicate(existing, new);
-        assert_eq!(result.len(), 3);
-        assert_eq!(result[0].date, "2025-01-10");
-        assert_eq!(result[1].date, "2025-01-15");
-        assert_eq!(result[2].date, "2025-01-20");
-    }
-
-    #[test]
-    fn test_merge_deduplicates_within_new() {
-        let new = vec![
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
-        ];
-        let result = merge_and_deduplicate(vec![], new);
-        assert_eq!(result.len(), 1);
-    }
-
-    // ========== load_existing_entries tests ==========
-
-    #[test]
-    fn test_load_existing_entries_file_not_exists() {
-        let path = PathBuf::from("/nonexistent/path/homework.json");
-        let result = load_existing_entries(&path).unwrap();
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn test_load_existing_entries_valid_json() {
-        let temp_dir = TempDir::new().unwrap();
-        let json_path = temp_dir.path().join("homework.json");
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-        let json = serde_json::to_string_pretty(&entries).unwrap();
-        std::fs::write(&json_path, json).unwrap();
-
-        let loaded = load_existing_entries(&json_path).unwrap();
-        assert_eq!(loaded.len(), 1);
-    }
-
-    #[test]
-    fn test_load_existing_entries_invalid_json() {
-        let temp_dir = TempDir::new().unwrap();
-        let json_path = temp_dir.path().join("homework.json");
-        std::fs::write(&json_path, "not valid json").unwrap();
-
-        let result = load_existing_entries(&json_path);
-        assert!(result.is_err());
-    }
-
-    // ========== save_json tests ==========
-
-    #[test]
-    fn test_save_json_creates_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let json_path = temp_dir.path().join("homework.json");
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-
-        save_json(&entries, &json_path).unwrap();
-        assert!(json_path.exists());
-    }
-
-    #[test]
-    fn test_save_json_roundtrip() {
-        let temp_dir = TempDir::new().unwrap();
-        let json_path = temp_dir.path().join("homework.json");
-        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-
-        save_json(&entries, &json_path).unwrap();
-        let loaded = load_existing_entries(&json_path).unwrap();
-        assert_eq!(entries, loaded);
     }
 
     // ========== find_all_exports tests ==========
@@ -407,7 +206,7 @@ mod tests {
         assert!(files.is_empty());
     }
 
-    // ========== process_all_exports tests ==========
+    // ========== parse_all_exports tests ==========
 
     fn create_test_excel_xml(path: &std::path::Path, entries: &[(&str, &str, &str, &str)]) {
         let mut rows = String::from(
@@ -427,7 +226,7 @@ mod tests {
     }
 
     #[test]
-    fn test_process_all_exports_with_new_files() {
+    fn test_parse_all_exports_with_files() {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir(&data_dir).unwrap();
@@ -440,70 +239,27 @@ mod tests {
             ],
         );
 
-        let output_path = temp_dir.path().to_path_buf();
-        let result = with_temp_dir(&temp_dir, || process_all_exports(&output_path));
+        let result = with_temp_dir(&temp_dir, parse_all_exports);
 
         assert!(result.is_ok());
         let entries = result.unwrap();
         assert_eq!(entries.len(), 2);
-        assert!(temp_dir.path().join("homework.json").exists());
     }
 
     #[test]
-    fn test_process_all_exports_merges_with_existing() {
+    fn test_parse_all_exports_no_files() {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir(&data_dir).unwrap();
 
-        let existing = vec![make_entry("compiti", "2025-01-10", "INGLESE", "Existing")];
-        save_json(&existing, &temp_dir.path().join("homework.json")).unwrap();
-
-        create_test_excel_xml(
-            &data_dir.join("export_20250115.xls"),
-            &[("nota", "2025-01-15", "MATEMATICA", "New task")],
-        );
-
-        let output_path = temp_dir.path().to_path_buf();
-        let result = with_temp_dir(&temp_dir, || process_all_exports(&output_path));
-
-        assert!(result.is_ok());
-        let entries = result.unwrap();
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].date, "2025-01-10");
-        assert_eq!(entries[1].date, "2025-01-15");
-    }
-
-    #[test]
-    fn test_process_all_exports_no_files_no_existing_data() {
-        let temp_dir = TempDir::new().unwrap();
-        let data_dir = temp_dir.path().join("data");
-        std::fs::create_dir(&data_dir).unwrap();
-
-        let output_path = temp_dir.path().to_path_buf();
-        let result = with_temp_dir(&temp_dir, || process_all_exports(&output_path));
+        let result = with_temp_dir(&temp_dir, parse_all_exports);
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("No export files"));
     }
 
     #[test]
-    fn test_process_all_exports_no_files_with_existing_data() {
-        let temp_dir = TempDir::new().unwrap();
-        let data_dir = temp_dir.path().join("data");
-        std::fs::create_dir(&data_dir).unwrap();
-
-        let existing = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
-        save_json(&existing, &temp_dir.path().join("homework.json")).unwrap();
-
-        let output_path = temp_dir.path().to_path_buf();
-        let result = with_temp_dir(&temp_dir, || process_all_exports(&output_path));
-
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 1);
-    }
-
-    #[test]
-    fn test_process_all_exports_handles_invalid_file() {
+    fn test_parse_all_exports_handles_invalid_file() {
         let temp_dir = TempDir::new().unwrap();
         let data_dir = temp_dir.path().join("data");
         std::fs::create_dir(&data_dir).unwrap();
@@ -514,11 +270,33 @@ mod tests {
         );
         std::fs::write(data_dir.join("export_20250116.xls"), "invalid xml").unwrap();
 
-        let output_path = temp_dir.path().to_path_buf();
-        let result = with_temp_dir(&temp_dir, || process_all_exports(&output_path));
+        let result = with_temp_dir(&temp_dir, parse_all_exports);
 
         assert!(result.is_ok());
+        // Only the valid file's entries
         assert_eq!(result.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_parse_all_exports_multiple_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let data_dir = temp_dir.path().join("data");
+        std::fs::create_dir(&data_dir).unwrap();
+
+        create_test_excel_xml(
+            &data_dir.join("export_20250115.xls"),
+            &[("compiti", "2025-01-15", "MATEMATICA", "Task 1")],
+        );
+        create_test_excel_xml(
+            &data_dir.join("export_20250116.xls"),
+            &[("nota", "2025-01-16", "ITALIANO", "Task 2")],
+        );
+
+        let result = with_temp_dir(&temp_dir, parse_all_exports);
+
+        assert!(result.is_ok());
+        let entries = result.unwrap();
+        assert_eq!(entries.len(), 2);
     }
 
     // ========== is_test_or_quiz tests ==========

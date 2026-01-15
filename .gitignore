@@ -13,7 +13,6 @@ data/*.db-wal
 data/*.db-shm
 
 # Generated files
-homework.json
 index.html
 
 # Coverage reports

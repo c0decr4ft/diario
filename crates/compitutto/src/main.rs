@@ -74,7 +74,7 @@ async fn main() -> Result<()> {
             server::serve(port, args.output).await?;
         }
         Some(Commands::Build) => {
-            let entries = data::process_all_exports(&args.output)?;
+            let entries = data::parse_all_exports()?;
             let html_path = args.output.join("index.html");
             html::generate_html(&entries, &html_path)?;
             info!(path = %html_path.display(), "HTML saved");
