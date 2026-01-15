@@ -1,6 +1,7 @@
 use axum::{response::Html, routing::get, Router};
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventResult};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,16 +36,22 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// Start the web server with file watching
-pub async fn serve(port: u16, output_dir: PathBuf) -> anyhow::Result<()> {
-    // Process data on startup
+/// Initialize server state by loading data from disk
+pub fn init_server_state(output_dir: PathBuf) -> anyhow::Result<Arc<AppState>> {
     println!("Scanning data directory...");
     let entries = data::process_all_exports(&output_dir)?;
 
-    let state = Arc::new(AppState {
-        entries: RwLock::new(entries),
-        output_dir: output_dir.clone(),
-    });
+    Ok(Arc::new(AppState::new(entries, output_dir)))
+}
+
+/// Create a socket address for the server
+pub fn create_server_addr(port: u16) -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], port))
+}
+
+/// Start the web server with file watching
+pub async fn serve(port: u16, output_dir: PathBuf) -> anyhow::Result<()> {
+    let state = init_server_state(output_dir)?;
 
     // Start file watcher
     let watcher_state = state.clone();
@@ -52,7 +59,7 @@ pub async fn serve(port: u16, output_dir: PathBuf) -> anyhow::Result<()> {
 
     let app = create_router(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
+    let addr = create_server_addr(port);
     println!("\nServer running at http://{}", addr);
     println!("Watching data/ for changes...");
     println!("Press Ctrl+C to stop\n");
@@ -63,12 +70,85 @@ pub async fn serve(port: u16, output_dir: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Check if a path is an export file that should trigger a refresh
+pub fn is_export_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.starts_with("export_") && n.contains(".xls"))
+        .unwrap_or(false)
+}
+
+/// Ensure the data directory exists, creating it if necessary
+pub fn ensure_data_dir(data_dir: &Path) -> anyhow::Result<bool> {
+    if !data_dir.exists() {
+        std::fs::create_dir_all(data_dir)?;
+        Ok(true) // Created
+    } else {
+        Ok(false) // Already existed
+    }
+}
+
+/// Describes the result of processing a file change event
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefreshResult {
+    /// Entries were updated with a count change
+    Updated { old_count: usize, new_count: usize },
+    /// No new entries were found
+    NoChange { count: usize },
+    /// Refresh failed with an error message
+    Error(String),
+}
+
+impl RefreshResult {
+    /// Log the result to stdout/stderr
+    pub fn log(&self) {
+        match self {
+            RefreshResult::Updated {
+                old_count,
+                new_count,
+            } => {
+                println!(
+                    "Updated: {} entries ({:+})",
+                    new_count,
+                    *new_count as i64 - *old_count as i64
+                );
+            }
+            RefreshResult::NoChange { .. } => {
+                println!("No new entries found");
+            }
+            RefreshResult::Error(e) => {
+                eprintln!("Failed to refresh: {}", e);
+            }
+        }
+    }
+}
+
+/// Process a refresh, updating entries and returning the result
+pub async fn process_refresh(state: &AppState) -> RefreshResult {
+    match data::process_all_exports(&state.output_dir) {
+        Ok(new_entries) => {
+            let mut entries = state.entries.write().await;
+            let old_count = entries.len();
+            *entries = new_entries;
+            let new_count = entries.len();
+            if new_count != old_count {
+                RefreshResult::Updated {
+                    old_count,
+                    new_count,
+                }
+            } else {
+                RefreshResult::NoChange { count: new_count }
+            }
+        }
+        Err(e) => RefreshResult::Error(e.to_string()),
+    }
+}
+
 /// Start watching the data directory for changes
 fn start_file_watcher(state: Arc<AppState>) -> anyhow::Result<()> {
     let data_dir = PathBuf::from("data");
 
-    if !data_dir.exists() {
-        std::fs::create_dir_all(&data_dir)?;
+    if ensure_data_dir(&data_dir)? {
         println!("Created data/ directory");
     }
 
@@ -83,14 +163,7 @@ fn start_file_watcher(state: Arc<AppState>) -> anyhow::Result<()> {
             Duration::from_secs(2),
             move |result: DebounceEventResult| {
                 if let Ok(events) = result {
-                    // Check if any event is for an export file
-                    let has_export = events.iter().any(|e| {
-                        e.path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .map(|n| n.starts_with("export_") && n.contains(".xls"))
-                            .unwrap_or(false)
-                    });
+                    let has_export = events.iter().any(|e| is_export_file(&e.path));
 
                     if has_export {
                         let _ = tx_clone.blocking_send(());
@@ -115,26 +188,8 @@ fn start_file_watcher(state: Arc<AppState>) -> anyhow::Result<()> {
     tokio::spawn(async move {
         while rx.recv().await.is_some() {
             println!("\nDetected changes in data/...");
-            match data::process_all_exports(&state.output_dir) {
-                Ok(new_entries) => {
-                    let mut entries = state.entries.write().await;
-                    let old_count = entries.len();
-                    *entries = new_entries;
-                    let new_count = entries.len();
-                    if new_count != old_count {
-                        println!(
-                            "Updated: {} entries ({:+})",
-                            new_count,
-                            new_count as i64 - old_count as i64
-                        );
-                    } else {
-                        println!("No new entries found");
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Failed to refresh: {}", e);
-                }
-            }
+            let result = process_refresh(&state).await;
+            result.log();
         }
     });
 
@@ -551,5 +606,300 @@ mod tests {
         // Read and verify
         let entries = state.entries.read().await;
         assert_eq!(entries.len(), 2);
+    }
+
+    // ========== is_export_file tests ==========
+
+    #[test]
+    fn test_is_export_file_valid() {
+        assert!(is_export_file(Path::new("export_2025.xls")));
+        assert!(is_export_file(Path::new("export_homework.xls")));
+        assert!(is_export_file(Path::new("export_.xls")));
+        assert!(is_export_file(Path::new("/path/to/export_data.xls")));
+        assert!(is_export_file(Path::new("data/export_test.xls")));
+    }
+
+    #[test]
+    fn test_is_export_file_xlsx() {
+        // .xlsx files should also match (contains ".xls")
+        assert!(is_export_file(Path::new("export_2025.xlsx")));
+    }
+
+    #[test]
+    fn test_is_export_file_invalid_prefix() {
+        assert!(!is_export_file(Path::new("homework.xls")));
+        assert!(!is_export_file(Path::new("data.xls")));
+        assert!(!is_export_file(Path::new("xport_file.xls")));
+        assert!(!is_export_file(Path::new("Export_file.xls"))); // Case sensitive
+    }
+
+    #[test]
+    fn test_is_export_file_invalid_extension() {
+        assert!(!is_export_file(Path::new("export_data.txt")));
+        assert!(!is_export_file(Path::new("export_data.csv")));
+        assert!(!is_export_file(Path::new("export_data.json")));
+        assert!(!is_export_file(Path::new("export_data")));
+    }
+
+    #[test]
+    fn test_is_export_file_edge_cases() {
+        assert!(!is_export_file(Path::new("")));
+        assert!(!is_export_file(Path::new("/")));
+        assert!(!is_export_file(Path::new("/path/to/")));
+        assert!(!is_export_file(Path::new(".")));
+        assert!(!is_export_file(Path::new("..")));
+    }
+
+    // ========== ensure_data_dir tests ==========
+
+    #[test]
+    fn test_ensure_data_dir_creates_new() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let data_dir = temp_dir.path().join("new_data_dir");
+
+        assert!(!data_dir.exists());
+        let created = ensure_data_dir(&data_dir).unwrap();
+        assert!(created);
+        assert!(data_dir.exists());
+    }
+
+    #[test]
+    fn test_ensure_data_dir_already_exists() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let data_dir = temp_dir.path().join("existing_dir");
+        std::fs::create_dir(&data_dir).unwrap();
+
+        assert!(data_dir.exists());
+        let created = ensure_data_dir(&data_dir).unwrap();
+        assert!(!created);
+        assert!(data_dir.exists());
+    }
+
+    #[test]
+    fn test_ensure_data_dir_nested() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let data_dir = temp_dir.path().join("a").join("b").join("c");
+
+        assert!(!data_dir.exists());
+        let created = ensure_data_dir(&data_dir).unwrap();
+        assert!(created);
+        assert!(data_dir.exists());
+    }
+
+    // ========== create_server_addr tests ==========
+
+    #[test]
+    fn test_create_server_addr() {
+        let addr = create_server_addr(8080);
+        assert_eq!(addr.port(), 8080);
+        assert_eq!(addr.ip().to_string(), "127.0.0.1");
+    }
+
+    #[test]
+    fn test_create_server_addr_different_ports() {
+        assert_eq!(create_server_addr(3000).port(), 3000);
+        assert_eq!(create_server_addr(0).port(), 0);
+        assert_eq!(create_server_addr(65535).port(), 65535);
+    }
+
+    // ========== init_server_state tests ==========
+
+    #[tokio::test]
+    async fn test_init_server_state_with_data() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("data")).unwrap();
+
+        // Create homework.json
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let json = serde_json::to_string(&entries).unwrap();
+        std::fs::write(temp_dir.path().join("homework.json"), json).unwrap();
+
+        let state = with_temp_dir_async(&temp_dir, || async {
+            init_server_state(temp_dir.path().to_path_buf()).unwrap()
+        })
+        .await;
+
+        let read_entries = state.entries.read().await;
+        assert_eq!(read_entries.len(), 1);
+        assert_eq!(state.output_dir, temp_dir.path().to_path_buf());
+    }
+
+    #[tokio::test]
+    async fn test_init_server_state_no_data() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("data")).unwrap();
+        // No homework.json
+
+        let result = with_temp_dir_async(&temp_dir, || async {
+            init_server_state(temp_dir.path().to_path_buf())
+        })
+        .await;
+
+        // Should fail because no data exists
+        assert!(result.is_err());
+    }
+
+    // ========== RefreshResult tests ==========
+
+    #[test]
+    fn test_refresh_result_updated() {
+        let result = RefreshResult::Updated {
+            old_count: 5,
+            new_count: 10,
+        };
+        assert_eq!(
+            result,
+            RefreshResult::Updated {
+                old_count: 5,
+                new_count: 10
+            }
+        );
+
+        // Just ensure log doesn't panic
+        result.log();
+    }
+
+    #[test]
+    fn test_refresh_result_no_change() {
+        let result = RefreshResult::NoChange { count: 5 };
+        assert_eq!(result, RefreshResult::NoChange { count: 5 });
+        result.log();
+    }
+
+    #[test]
+    fn test_refresh_result_error() {
+        let result = RefreshResult::Error("test error".to_string());
+        assert_eq!(result, RefreshResult::Error("test error".to_string()));
+        result.log();
+    }
+
+    #[test]
+    fn test_refresh_result_debug() {
+        let result = RefreshResult::Updated {
+            old_count: 1,
+            new_count: 2,
+        };
+        let debug_str = format!("{:?}", result);
+        assert!(debug_str.contains("Updated"));
+    }
+
+    #[test]
+    fn test_refresh_result_clone() {
+        let result = RefreshResult::Updated {
+            old_count: 1,
+            new_count: 2,
+        };
+        let cloned = result.clone();
+        assert_eq!(result, cloned);
+    }
+
+    // ========== process_refresh tests ==========
+
+    #[tokio::test]
+    async fn test_process_refresh_with_new_entries() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("data")).unwrap();
+
+        // Create initial state with no entries
+        let state = AppState::new(vec![], temp_dir.path().to_path_buf());
+
+        // Create homework.json with one entry
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let json = serde_json::to_string(&entries).unwrap();
+        std::fs::write(temp_dir.path().join("homework.json"), json).unwrap();
+
+        let result =
+            with_temp_dir_async(&temp_dir, || async { process_refresh(&state).await }).await;
+
+        match result {
+            RefreshResult::Updated {
+                old_count,
+                new_count,
+            } => {
+                assert_eq!(old_count, 0);
+                assert_eq!(new_count, 1);
+            }
+            _ => panic!("Expected Updated result, got {:?}", result),
+        }
+
+        // Verify state was updated
+        let read_entries = state.entries.read().await;
+        assert_eq!(read_entries.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_process_refresh_no_change() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("data")).unwrap();
+
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+
+        // Create homework.json
+        let json = serde_json::to_string(&entries).unwrap();
+        std::fs::write(temp_dir.path().join("homework.json"), json).unwrap();
+
+        // Create state with same entries
+        let state = AppState::new(entries.clone(), temp_dir.path().to_path_buf());
+
+        let result =
+            with_temp_dir_async(&temp_dir, || async { process_refresh(&state).await }).await;
+
+        match result {
+            RefreshResult::NoChange { count } => {
+                assert_eq!(count, 1);
+            }
+            _ => panic!("Expected NoChange result, got {:?}", result),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_refresh_error() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("data")).unwrap();
+        // No homework.json - will cause error
+
+        let state = AppState::new(vec![], temp_dir.path().to_path_buf());
+
+        let result =
+            with_temp_dir_async(&temp_dir, || async { process_refresh(&state).await }).await;
+
+        match result {
+            RefreshResult::Error(msg) => {
+                assert!(!msg.is_empty());
+            }
+            _ => panic!("Expected Error result, got {:?}", result),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_refresh_decrease_entries() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(temp_dir.path().join("data")).unwrap();
+
+        // Start with 2 entries
+        let initial_entries = vec![
+            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
+        ];
+        let state = AppState::new(initial_entries, temp_dir.path().to_path_buf());
+
+        // homework.json has only 1 entry
+        let new_entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let json = serde_json::to_string(&new_entries).unwrap();
+        std::fs::write(temp_dir.path().join("homework.json"), json).unwrap();
+
+        let result =
+            with_temp_dir_async(&temp_dir, || async { process_refresh(&state).await }).await;
+
+        match result {
+            RefreshResult::Updated {
+                old_count,
+                new_count,
+            } => {
+                assert_eq!(old_count, 2);
+                assert_eq!(new_count, 1);
+            }
+            _ => panic!("Expected Updated result, got {:?}", result),
+        }
     }
 }

@@ -52,25 +52,27 @@ just cov-html       # HTML report in browser
 
 ## Code Coverage
 
-Current coverage: **92.54% line coverage**
+Current coverage: **94.75% line coverage**
 
 Run `just cov-report` for agent-readable JSON output:
 
 ```json
 {
   "summary": {
-    "lines": { "count": 1783, "covered": 1650, "percent": 92.54 },
-    "functions": { "count": 187, "covered": 176, "percent": 94.12 }
+    "lines": { "count": 2038, "covered": 1931, "percent": 94.75 },
+    "functions": { "count": 233, "covered": 224, "percent": 96.14 }
   },
   "files": [
     { "file": "types.rs", "lines": { "percent": 100.0 } },
     { "file": "parser.rs", "lines": { "percent": 99.67 } },
     { "file": "html.rs", "lines": { "percent": 100.0 } },
     { "file": "data.rs", "lines": { "percent": 100.0 } },
-    { "file": "server.rs", "lines": { "percent": 80.48 } }
+    { "file": "server.rs", "lines": { "percent": 91.70 } }
   ]
 }
 ```
+
+Note: The remaining uncovered code in `server.rs` (~8%) is infrastructure code that runs indefinitely (file watcher loop, `axum::serve().await`). This is intentionally not tested as it requires integration-level testing.
 
 ## Testing Patterns
 
@@ -134,6 +136,37 @@ Deduplication is based on `(date, subject, task)` - entry_type is ignored.
 pub struct AppState {
     pub entries: RwLock<Vec<HomeworkEntry>>,
     pub output_dir: PathBuf,
+}
+```
+
+### Server Helper Functions
+
+The server module exposes testable helper functions:
+
+```rust
+// Check if a path matches the export file pattern
+pub fn is_export_file(path: &Path) -> bool
+
+// Create data directory if missing, returns whether it was created
+pub fn ensure_data_dir(data_dir: &Path) -> anyhow::Result<bool>
+
+// Create a socket address for the server
+pub fn create_server_addr(port: u16) -> SocketAddr
+
+// Initialize server state by loading data from disk
+pub fn init_server_state(output_dir: PathBuf) -> anyhow::Result<Arc<AppState>>
+
+// Process a refresh, updating entries and returning the result
+pub async fn process_refresh(state: &AppState) -> RefreshResult
+```
+
+### RefreshResult
+
+```rust
+pub enum RefreshResult {
+    Updated { old_count: usize, new_count: usize },
+    NoChange { count: usize },
+    Error(String),
 }
 ```
 
