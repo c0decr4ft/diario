@@ -994,6 +994,32 @@ dialog p {
     white-space: nowrap;
 }
 
+/* Calendar entry type colors (matching list view) */
+.cal-entry[data-type="compiti"] {
+    background: rgba(255, 0, 150, 0.15);
+    border-left-color: #ff0096;
+}
+
+.cal-entry[data-type="nota"] {
+    background: rgba(51, 102, 255, 0.15);
+    border-left-color: #3366ff;
+}
+
+.cal-entry[data-type="verifica"] {
+    background: rgba(255, 102, 0, 0.15);
+    border-left-color: #ff6600;
+}
+
+.cal-entry[data-type="interrogazione"] {
+    background: rgba(255, 51, 102, 0.15);
+    border-left-color: #ff3366;
+}
+
+.cal-entry[data-type="studio"] {
+    background: rgba(0, 255, 255, 0.15);
+    border-left-color: #00ffff;
+}
+
 .cal-entry.completed {
     opacity: 0.4;
     text-decoration: line-through;
@@ -1081,6 +1107,27 @@ dialog p {
     transition: all 0.2s;
 }
 
+/* Sidebar entry type colors (matching list view) */
+.sidebar-entry[data-type="compiti"] {
+    border-left-color: #ff0096;
+}
+
+.sidebar-entry[data-type="nota"] {
+    border-left-color: #3366ff;
+}
+
+.sidebar-entry[data-type="verifica"] {
+    border-left-color: #ff6600;
+}
+
+.sidebar-entry[data-type="interrogazione"] {
+    border-left-color: #ff3366;
+}
+
+.sidebar-entry[data-type="studio"] {
+    border-left-color: #00ffff;
+}
+
 .sidebar-entry:hover {
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 0, 150, 0.3);
@@ -1121,6 +1168,27 @@ dialog p {
     text-transform: uppercase;
     font-weight: 700;
     margin-left: auto;
+}
+
+/* Sidebar entry type badge colors (matching list view) */
+.sidebar-entry-type[data-type="compiti"] {
+    background: linear-gradient(135deg, #ff0096, #9933ff);
+}
+
+.sidebar-entry-type[data-type="nota"] {
+    background: linear-gradient(135deg, #3366ff, #00ffff);
+}
+
+.sidebar-entry-type[data-type="verifica"] {
+    background: linear-gradient(135deg, #ff6600, #ff0033);
+}
+
+.sidebar-entry-type[data-type="interrogazione"] {
+    background: linear-gradient(135deg, #ff3366, #ff0096);
+}
+
+.sidebar-entry-type[data-type="studio"] {
+    background: linear-gradient(135deg, #00ffff, #33ff99);
 }
 
 .sidebar-entry-task {
@@ -1643,10 +1711,12 @@ function renderSidebar(dateStr) {
     entries.forEach(entry => {
         const completedClass = entry.completed ? ' completed' : '';
         const checkedAttr = entry.completed ? ' checked' : '';
-        const typeHtml = entry.entry_type ? `<span class="sidebar-entry-type">${escapeHtml(entry.entry_type)}</span>` : '';
+        const typeLower = entry.entry_type ? entry.entry_type.toLowerCase() : '';
+        const typeAttr = typeLower ? ` data-type="${typeLower}"` : '';
+        const typeHtml = entry.entry_type ? `<span class="sidebar-entry-type" data-type="${typeLower}">${escapeHtml(entry.entry_type)}</span>` : '';
         
         html += `
-            <div class="sidebar-entry${completedClass}" data-entry-id="${entry.id}">
+            <div class="sidebar-entry${completedClass}" data-entry-id="${entry.id}"${typeAttr}>
                 <div class="sidebar-entry-header">
                     <input type="checkbox" class="sidebar-entry-checkbox" data-entry-id="${entry.id}"${checkedAttr}>
                     <span class="sidebar-entry-subject">${escapeHtml(entry.subject)}</span>
@@ -1840,7 +1910,8 @@ function renderCalendarDay(day, dateStr, isOtherMonth, isToday = false, isSelect
     const entriesToShow = entries.slice(0, maxEntries);
     entriesToShow.forEach(entry => {
         const completedClass = entry.completed ? ' completed' : '';
-        html += `<div class="cal-entry${completedClass}">`;
+        const typeAttr = entry.entry_type ? ` data-type="${entry.entry_type.toLowerCase()}"` : '';
+        html += `<div class="cal-entry${completedClass}"${typeAttr}>`;
         html += `<span class="cal-entry-subject">${escapeHtml(entry.subject)}</span>`;
         html += '</div>';
     });
