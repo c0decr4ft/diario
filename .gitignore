@@ -1,22 +1,51 @@
 # Environment variables
 .env
 
-# Data files
+# Data files (user exports)
+!data/.gitkeep
 data/*.xls
 data/*.xlsx
-data/*.png
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+# SQLite database
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 
-# Virtual environments
-venv/
-env/
-ENV/
+# Generated files
+index.html
+
+# Coverage reports
+coverage.json
+lcov.info
+
+# Rust build
+/target/
+Cargo.lock
+
+# JavaScript/Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.npm
+.yarn/
+.pnp.*
+dist/
+build/
+.next/
+out/
+.nuxt/
+.cache/
+.parcel-cache/
+*.tsbuildinfo
+*.log
 
 # IDE
 .vscode/
@@ -28,3 +57,6 @@ ENV/
 .DS_Store
 Thumbs.db
 
+# Git worktrees
+/trees/*
+!/trees/.gitkeep

@@ -1,0 +1,57 @@
+[package]
+name = "compitutto"
+version = "0.1.0"
+edition = "2021"
+description = "Parse homework calendar exports and generate a web view"
+license = "MIT"
+
+[[bin]]
+name = "compitutto"
+path = "src/main.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Excel file parsing (calamine for modern formats, quick-xml for SpreadsheetML)
+calamine = { version = "0.32", features = ["chrono"] }
+quick-xml = "0.38"
+
+# Date/time handling
+chrono = "0.4"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# HTML templating
+maud = "0.27"
+
+# Web server
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["fs"] }
+
+# File watching
+notify = "8"
+notify-debouncer-mini = "0.7"
+
+# Database
+rusqlite = { version = "0.38", features = ["bundled"] }
+
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+hyper = "1"

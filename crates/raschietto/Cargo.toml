@@ -1,0 +1,39 @@
+[package]
+name = "raschietto"
+version = "0.1.0"
+edition = "2021"
+description = "Automated fetcher for Classe Viva homework exports"
+license = "MIT"
+
+[[bin]]
+name = "raschietto"
+path = "src/main.rs"
+
+[dependencies]
+# Browser automation
+playwright = "0.0.20"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Environment variables
+dotenvy = "0.15"
+
+# Error handling
+anyhow = "1"
+
+# Serialization (for JS arguments)
+serde_json = "1"
+
+# HTTP client (for direct downloads - workaround for playwright-rust download bugs)
+reqwest = { version = "0.12", features = ["cookies"] }
+
+# Date/time handling
+chrono = "0.4"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

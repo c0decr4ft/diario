@@ -1,94 +1,130 @@
-# Compitutto
+# Diario
 
-A modern, Gen Alpha-styled homework calendar viewer for ClasseViva exports.
+A homework calendar system for ClasseViva. Includes two crates:
+
+- **compitutto** - Web viewer for homework exports
+- **raschietto** - Automated fetcher for ClasseViva exports
 
 ## Setup
 
-1. Install dependencies:
+1. Install Rust (if not already installed):
 ```bash
-pip3 install -r requirements.txt
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-   **Note:** On macOS, use `pip3` instead of `pip`. If you get "command not found", make sure Python 3 is installed.
-
-2. Install Playwright browsers (required for automation):
+2. Build the project:
 ```bash
-python3 -m playwright install chromium
+cargo build --release
 ```
 
-This will automatically download the Chromium browser that Playwright uses. No separate ChromeDriver needed!
-
-3. Create a `.env` file in the project root with your ClasseViva credentials:
+3. (Optional) For automated fetching, install Playwright:
+```bash
+just setup-browser
 ```
-CLASSEVIVA_USERNAME=your_username
+
+## Compitutto (Viewer)
+
+Drop Excel export files into the `data/` directory and view them in a styled web interface.
+
+### Start the Server
+
+```bash
+just s
+```
+
+Or without just:
+```bash
+cargo run -p compitutto --release
+```
+
+This will:
+- Scan `data/` for export files
+- Import entries into `data/homework.db` (SQLite)
+- Start a web server at http://localhost:8080
+- Watch for new files and auto-update
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `just s` | Start web server |
+| `just serve 3000` | Start on custom port |
+| `just html` | Generate static HTML only |
+| `just status` | Show data status |
+
+### CLI
+
+```bash
+compitutto              # Start server (default)
+compitutto serve -p 80  # Custom port
+compitutto build        # Static HTML only
+```
+
+## Raschietto (Fetcher)
+
+Automated fetcher that logs into ClasseViva and downloads homework exports.
+
+### Setup
+
+1. Create a `.env` file with your credentials:
+```bash
+CLASSEVIVA_USER=your_username
 CLASSEVIVA_PASSWORD=your_password
 ```
 
-## Usage
-
-### Quick Commands (using Justfile)
-
-The easiest way to use this project is with `just` commands:
-
+2. Install the Playwright browser:
 ```bash
-# Download, parse, and open in browser (recommended)
-just update
-
-# Just download and parse
-just all
-
-# Download export only
-just download
-
-# Parse existing export
-just parse
-
-# Open HTML view in browser
-just open
-
-# Check status of files
-just status
-
-# See all available commands
-just --list
+just setup-browser
 ```
 
-### Manual Commands
+### Commands
 
-If you don't have `just` installed, you can use the Python scripts directly:
+| Command | Description |
+|---------|-------------|
+| `just fetch` | Fetch new exports (headless) |
+| `just fetch-debug` | Fetch with visible browser |
+| `just fetch-dry` | Verify login only (no download) |
+
+### CLI
 
 ```bash
-# Download and parse automatically
-python3 parse_homework.py --download
-
-# Parse existing export file
-python3 parse_homework.py
-
-# Parse specific file
-python3 parse_homework.py --file data/export_20251226.xls
-
-# Just download (without parsing)
-python3 download_export.py
-
-# Interactive mode (see what's happening)
-python3 download_export.py --interactive
+raschietto fetch                    # Default date range (7 days ago to 15 days ahead)
+raschietto fetch --from 2025-01-01  # Custom start date
+raschietto fetch --to 2025-02-01    # Custom end date
+raschietto fetch --headed           # Show browser window
+raschietto fetch --dry-run          # Verify credentials only
+raschietto fetch -o ./exports       # Custom output directory
 ```
 
-**Note:** 
-- Install `just` with `brew install just` for easier command management
-- First time setup: Run `playwright install chromium` after installing dependencies
+## Workflow
+
+### Quick Start
+```bash
+just go
+```
+This fetches new exports, starts the server, and opens the browser - all in one command.
+
+### Manual
+1. Export homework from ClasseViva as Excel (.xls)
+2. Drop the file into the `data/` directory
+3. The server auto-detects new files and updates
+4. View at http://localhost:8080
+
+### Automated
+1. Run `just fetch` to download new exports
+2. Files are saved to `data/` automatically
+3. The server picks them up if running
+
+Files are deduplicated automatically, so you can fetch overlapping date ranges without creating duplicates.
 
 ## Output
 
-- `index.html` - The web view of your homework calendar
-- `homework.json` - JSON export of all entries
-- `data/export_YYYYMMDD.xls` - Downloaded export files (e.g., `export_20251226.xls`)
+- `data/homework.db` - SQLite database with all entries
+- `data/export_*.xls` - Downloaded export files
+- `index.html` - Generated when using `build` command
 
-**File Management:**
-- Files are downloaded to the `data/` directory
-- Each file is named with the date: `export_YYYYMMDD.xls`
-- Old export files (older than 7 days) are automatically cleaned up
-- If you download on the same day, the old file is replaced
+## API Endpoints
 
-Open `index.html` in your browser to view your homework with checkboxes to track completion!
-
+- `GET /` - The homework calendar UI
+- `GET /api/entries` - JSON data
+- `GET /api/refresh` - Manual refresh trigger
