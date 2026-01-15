@@ -1,4 +1,8 @@
+# Environment variables
+.env
+
 # Data files (user exports)
+!data/.gitkeep
 data/*.xls
 data/*.xlsx
 

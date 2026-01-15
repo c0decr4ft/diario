@@ -1,22 +1,77 @@
 use anyhow::{Context, Result};
+use calamine::{open_workbook_auto, Data, Reader};
+use quick_xml::escape::unescape;
 use quick_xml::events::Event;
-use quick_xml::reader::Reader;
+use quick_xml::reader::Reader as XmlReader;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
 use crate::types::HomeworkEntry;
 
-/// Parse an Excel XML (SpreadsheetML) file and extract homework entries
+/// Parse an Excel file and extract homework entries.
+/// Supports SpreadsheetML XML format (.xls with XML content) and modern Excel formats (.xlsx, .xlsb, .ods)
 pub fn parse_excel_xml(path: &Path) -> Result<Vec<HomeworkEntry>> {
+    // First try to read the file to check if it's SpreadsheetML XML
     let content = fs::read_to_string(path).context("Failed to read file")?;
 
-    // Check if it's XML format
-    if !content.starts_with("<?xml") && !content.contains("<Workbook") {
-        anyhow::bail!("File does not appear to be Excel XML format");
+    // Check if it's SpreadsheetML XML format
+    if content.starts_with("<?xml") || content.contains("<Workbook") {
+        return parse_spreadsheet_ml(&content);
     }
 
-    let rows = parse_spreadsheet_rows(&content)?;
+    // Otherwise try calamine for modern Excel formats
+    parse_with_calamine(path)
+}
+
+/// Parse SpreadsheetML XML format (used by older Excel exports)
+fn parse_spreadsheet_ml(content: &str) -> Result<Vec<HomeworkEntry>> {
+    let rows = parse_spreadsheet_rows(content)?;
+
+    if rows.is_empty() {
+        anyhow::bail!("No data rows found in file");
+    }
+
+    // First row is headers
+    let headers = &rows[0];
+
+    // Map column indices
+    let col_indices = map_columns(headers);
+
+    // Parse data rows into entries
+    let mut entries = Vec::new();
+
+    for row in rows.iter().skip(1) {
+        if let Some(entry) = parse_row(row, &col_indices) {
+            entries.push(entry);
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Parse with calamine for modern Excel formats
+fn parse_with_calamine(path: &Path) -> Result<Vec<HomeworkEntry>> {
+    let mut workbook =
+        open_workbook_auto(path).with_context(|| format!("Failed to open file: {:?}", path))?;
+
+    // Get the first sheet name
+    let sheet_names = workbook.sheet_names().to_vec();
+    let sheet_name = sheet_names
+        .first()
+        .context("Workbook has no sheets")?
+        .clone();
+
+    // Get the sheet range
+    let range = workbook
+        .worksheet_range(&sheet_name)
+        .context("Failed to read worksheet")?;
+
+    // Convert to rows of strings
+    let rows: Vec<Vec<String>> = range
+        .rows()
+        .map(|row| row.iter().map(cell_to_string).collect())
+        .collect();
 
     if rows.is_empty() {
         anyhow::bail!("No data rows found in file");
@@ -42,8 +97,9 @@ pub fn parse_excel_xml(path: &Path) -> Result<Vec<HomeworkEntry>> {
 
 /// Parse SpreadsheetML XML into rows of cell values
 fn parse_spreadsheet_rows(xml: &str) -> Result<Vec<Vec<String>>> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
+    let mut reader = XmlReader::from_str(xml);
+    // Don't trim text - we'll trim at cell level to preserve spaces around entities
+    reader.config_mut().trim_text(false);
 
     let mut rows: Vec<Vec<String>> = Vec::new();
     let mut current_row: Vec<String> = Vec::new();
@@ -103,8 +159,27 @@ fn parse_spreadsheet_rows(xml: &str) -> Result<Vec<Vec<String>>> {
             }
             Ok(Event::Text(e)) => {
                 if in_data {
-                    if let Ok(text) = e.unescape() {
-                        current_text.push_str(&text);
+                    if let Ok(decoded) = e.decode() {
+                        if let Ok(text) = unescape(&decoded) {
+                            current_text.push_str(&text);
+                        }
+                    }
+                }
+            }
+            Ok(Event::GeneralRef(e)) => {
+                // Handle entity references like &amp;
+                if in_data {
+                    if let Ok(decoded) = e.decode() {
+                        // Resolve predefined XML entities
+                        let resolved = match decoded.as_ref() {
+                            "amp" => "&",
+                            "lt" => "<",
+                            "gt" => ">",
+                            "quot" => "\"",
+                            "apos" => "'",
+                            _ => "",
+                        };
+                        current_text.push_str(resolved);
                     }
                 }
             }
@@ -115,6 +190,39 @@ fn parse_spreadsheet_rows(xml: &str) -> Result<Vec<Vec<String>>> {
     }
 
     Ok(rows)
+}
+
+/// Convert a calamine Data cell to a String
+fn cell_to_string(cell: &Data) -> String {
+    match cell {
+        Data::Empty => String::new(),
+        Data::String(s) => s.clone(),
+        Data::Int(i) => i.to_string(),
+        Data::Float(f) => {
+            // Check if it's a whole number
+            if f.fract() == 0.0 {
+                (*f as i64).to_string()
+            } else {
+                f.to_string()
+            }
+        }
+        Data::Bool(b) => b.to_string(),
+        Data::DateTime(dt) => {
+            // Use chrono feature to convert to date string
+            if let Some(datetime) = dt.as_datetime() {
+                datetime.format("%Y-%m-%d").to_string()
+            } else {
+                // Fallback to raw value
+                dt.as_f64().to_string()
+            }
+        }
+        Data::DateTimeIso(s) => {
+            // Extract date part from ISO datetime
+            s.split('T').next().unwrap_or(s).to_string()
+        }
+        Data::DurationIso(s) => s.clone(),
+        Data::Error(e) => format!("#{:?}", e),
+    }
 }
 
 /// Map header names to column indices
@@ -191,8 +299,11 @@ fn normalize_date(date: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use calamine::Data;
     use std::io::Write;
     use tempfile::NamedTempFile;
+
+    // ========== Helper functions ==========
 
     /// Helper to create a temporary Excel XML file for testing
     fn create_test_xml_file(content: &str) -> NamedTempFile {
@@ -293,8 +404,8 @@ mod tests {
         let file = create_test_xml_file("This is not XML content");
         let result = parse_excel_xml(file.path());
 
+        // Should fail because it's neither XML nor a valid Excel file
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Excel XML format"));
     }
 
     #[test]
@@ -499,6 +610,55 @@ mod tests {
 
         let rows = parse_spreadsheet_rows(xml).unwrap();
         assert!(rows.is_empty());
+    }
+
+    // ========== cell_to_string tests ==========
+
+    #[test]
+    fn test_cell_to_string_empty() {
+        assert_eq!(cell_to_string(&Data::Empty), "");
+    }
+
+    #[test]
+    fn test_cell_to_string_string() {
+        assert_eq!(cell_to_string(&Data::String("hello".to_string())), "hello");
+    }
+
+    #[test]
+    fn test_cell_to_string_int() {
+        assert_eq!(cell_to_string(&Data::Int(42)), "42");
+    }
+
+    #[test]
+    fn test_cell_to_string_float_whole() {
+        assert_eq!(cell_to_string(&Data::Float(42.0)), "42");
+    }
+
+    #[test]
+    fn test_cell_to_string_float_decimal() {
+        assert_eq!(cell_to_string(&Data::Float(42.5)), "42.5");
+    }
+
+    #[test]
+    fn test_cell_to_string_bool() {
+        assert_eq!(cell_to_string(&Data::Bool(true)), "true");
+        assert_eq!(cell_to_string(&Data::Bool(false)), "false");
+    }
+
+    #[test]
+    fn test_cell_to_string_datetime_iso() {
+        assert_eq!(
+            cell_to_string(&Data::DateTimeIso("2025-01-15T10:30:00".to_string())),
+            "2025-01-15"
+        );
+    }
+
+    #[test]
+    fn test_cell_to_string_datetime_iso_date_only() {
+        assert_eq!(
+            cell_to_string(&Data::DateTimeIso("2025-01-15".to_string())),
+            "2025-01-15"
+        );
     }
 
     // ========== map_columns tests ==========
