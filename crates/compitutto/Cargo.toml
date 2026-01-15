@@ -37,3 +37,9 @@ tower-http = { version = "0.6", features = ["fs"] }
 # File watching
 notify = "7"
 notify-debouncer-mini = "0.5"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+hyper = "1"

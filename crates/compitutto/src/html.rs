@@ -346,3 +346,347 @@ document.querySelectorAll('.homework-checkbox').forEach(checkbox => {
 // Load states on page load
 loadCheckboxStates();
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Helper to create a HomeworkEntry
+    fn make_entry(entry_type: &str, date: &str, subject: &str, task: &str) -> HomeworkEntry {
+        HomeworkEntry::new(
+            entry_type.to_string(),
+            date.to_string(),
+            subject.to_string(),
+            task.to_string(),
+        )
+    }
+
+    // ========== render_page tests ==========
+
+    #[test]
+    fn test_render_page_empty_entries() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("<html"));
+        assert!(html.contains("Compitutto"));
+        assert!(html.contains("No homework entries found"));
+        assert!(html.contains("0")); // Total count
+    }
+
+    #[test]
+    fn test_render_page_single_entry() {
+        let entries = vec![make_entry(
+            "compiti",
+            "2025-01-15",
+            "MATEMATICA",
+            "Pag. 100 es. 1-5",
+        )];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("MATEMATICA"));
+        assert!(html.contains("Pag. 100 es. 1-5"));
+        assert!(html.contains("2025-01-15"));
+        assert!(html.contains("compiti"));
+        assert!(html.contains(">1<")); // Total count: 1
+    }
+
+    #[test]
+    fn test_render_page_multiple_entries_same_date() {
+        let entries = vec![
+            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+        ];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("MATEMATICA"));
+        assert!(html.contains("ITALIANO"));
+        assert!(html.contains("Task 1"));
+        assert!(html.contains("Task 2"));
+        // Should only have one date header for 2025-01-15
+        assert_eq!(html.matches("2025-01-15").count(), 1);
+    }
+
+    #[test]
+    fn test_render_page_multiple_dates() {
+        let entries = vec![
+            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-16", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-17", "INGLESE", "Task 3"),
+        ];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("2025-01-15"));
+        assert!(html.contains("2025-01-16"));
+        assert!(html.contains("2025-01-17"));
+        assert!(html.contains(">3<")); // Total count: 3
+    }
+
+    #[test]
+    fn test_render_page_has_required_elements() {
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let html = render_page(&entries).into_string();
+
+        // Check document structure
+        assert!(html.contains("<!DOCTYPE html>"));
+        assert!(html.contains("<html lang=\"en\""));
+        assert!(html.contains("<head>"));
+        assert!(html.contains("<body>"));
+
+        // Check meta tags
+        assert!(html.contains("charset=\"UTF-8\""));
+        assert!(html.contains("viewport"));
+
+        // Check title
+        assert!(html.contains("<title>Compitutto</title>"));
+
+        // Check CSS and JS
+        assert!(html.contains("<style>"));
+        assert!(html.contains("<script>"));
+    }
+
+    #[test]
+    fn test_render_page_has_checkboxes() {
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("homework-checkbox"));
+        assert!(html.contains("type=\"checkbox\""));
+        assert!(html.contains("data-entry-id"));
+    }
+
+    #[test]
+    fn test_render_page_escapes_html_in_task() {
+        let entries = vec![make_entry(
+            "compiti",
+            "2025-01-15",
+            "MATEMATICA",
+            "<script>alert('xss')</script>",
+        )];
+        let html = render_page(&entries).into_string();
+
+        // Should be escaped, not rendered as actual script tag
+        assert!(!html.contains("<script>alert('xss')</script>"));
+        assert!(html.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn test_render_page_handles_special_characters() {
+        let entries = vec![make_entry(
+            "compiti",
+            "2025-01-15",
+            "MATEMATICA",
+            "Esercizi con àèìòù & simboli",
+        )];
+        let html = render_page(&entries).into_string();
+
+        // Ampersand should be escaped
+        assert!(html.contains("Esercizi con àèìòù &amp; simboli"));
+    }
+
+    #[test]
+    fn test_render_page_empty_entry_type() {
+        let entries = vec![make_entry(
+            "", // Empty type
+            "2025-01-15",
+            "MATEMATICA",
+            "Task 1",
+        )];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("MATEMATICA"));
+        assert!(html.contains("Task 1"));
+        // Should not have a type badge element (span with homework-type class)
+        // The CSS class definition will still be there, but no <span class="homework-type">
+        assert!(!html.contains("<span class=\"homework-type\">"));
+    }
+
+    #[test]
+    fn test_render_page_entry_type_badge() {
+        let entries = vec![make_entry("nota", "2025-01-15", "MATEMATICA", "Task 1")];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("homework-type"));
+        assert!(html.contains("nota"));
+    }
+
+    #[test]
+    fn test_render_page_groups_entries_by_date() {
+        let entries = vec![
+            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+            make_entry("compiti", "2025-01-16", "INGLESE", "Task 3"),
+        ];
+        let html = render_page(&entries).into_string();
+
+        // Count date-group divs
+        let date_groups = html.matches("date-group").count();
+        // 2 groups (2 unique dates), each appearing in class name
+        assert!(date_groups >= 2);
+    }
+
+    #[test]
+    fn test_render_page_css_included() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("font-family"));
+        assert!(html.contains("background"));
+        assert!(html.contains(".homework-item"));
+        assert!(html.contains(".date-header"));
+    }
+
+    #[test]
+    fn test_render_page_javascript_included() {
+        let entries: Vec<HomeworkEntry> = vec![];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("localStorage"));
+        assert!(html.contains("loadCheckboxStates"));
+        assert!(html.contains("saveCheckboxState"));
+    }
+
+    // ========== render_date_group tests ==========
+
+    #[test]
+    fn test_render_date_group_basic() {
+        let entries = [
+            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+        ];
+        let refs: Vec<&HomeworkEntry> = entries.iter().collect();
+        let html = render_date_group("2025-01-15", &refs, 0).into_string();
+
+        assert!(html.contains("date-group"));
+        assert!(html.contains("2025-01-15"));
+        assert!(html.contains("MATEMATICA"));
+        assert!(html.contains("ITALIANO"));
+    }
+
+    #[test]
+    fn test_render_date_group_entry_ids() {
+        let entries = [
+            make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1"),
+            make_entry("nota", "2025-01-15", "ITALIANO", "Task 2"),
+        ];
+        let refs: Vec<&HomeworkEntry> = entries.iter().collect();
+
+        // Group index 0 -> entry IDs start at 1 (0*100+0+1, 0*100+1+1)
+        let html = render_date_group("2025-01-15", &refs, 0).into_string();
+        assert!(html.contains("entry-1"));
+        assert!(html.contains("entry-2"));
+
+        // Group index 1 -> entry IDs start at 101 (1*100+0+1, 1*100+1+1)
+        let html2 = render_date_group("2025-01-16", &refs, 1).into_string();
+        assert!(html2.contains("entry-101"));
+        assert!(html2.contains("entry-102"));
+    }
+
+    // ========== generate_html tests ==========
+
+    #[test]
+    fn test_generate_html_creates_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let html_path = temp_dir.path().join("index.html");
+
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+
+        generate_html(&entries, &html_path).unwrap();
+
+        assert!(html_path.exists());
+    }
+
+    #[test]
+    fn test_generate_html_content() {
+        let temp_dir = TempDir::new().unwrap();
+        let html_path = temp_dir.path().join("index.html");
+
+        let entries = vec![make_entry("compiti", "2025-01-15", "MATEMATICA", "Task 1")];
+
+        generate_html(&entries, &html_path).unwrap();
+
+        let content = std::fs::read_to_string(&html_path).unwrap();
+        assert!(content.contains("<!DOCTYPE html>"));
+        assert!(content.contains("MATEMATICA"));
+        assert!(content.contains("Task 1"));
+    }
+
+    #[test]
+    fn test_generate_html_overwrites_existing() {
+        let temp_dir = TempDir::new().unwrap();
+        let html_path = temp_dir.path().join("index.html");
+
+        std::fs::write(&html_path, "old content").unwrap();
+
+        let entries = vec![make_entry(
+            "compiti",
+            "2025-01-15",
+            "MATEMATICA",
+            "New task",
+        )];
+
+        generate_html(&entries, &html_path).unwrap();
+
+        let content = std::fs::read_to_string(&html_path).unwrap();
+        assert!(!content.contains("old content"));
+        assert!(content.contains("New task"));
+    }
+
+    #[test]
+    fn test_generate_html_empty_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let html_path = temp_dir.path().join("index.html");
+
+        generate_html(&[], &html_path).unwrap();
+
+        let content = std::fs::read_to_string(&html_path).unwrap();
+        assert!(content.contains("No homework entries found"));
+    }
+
+    // ========== Edge cases ==========
+
+    #[test]
+    fn test_render_page_long_task_text() {
+        let long_task = "A".repeat(1000);
+        let entries = vec![make_entry(
+            "compiti",
+            "2025-01-15",
+            "MATEMATICA",
+            &long_task,
+        )];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains(&long_task));
+    }
+
+    #[test]
+    fn test_render_page_unicode_content() {
+        let entries = vec![make_entry("compiti", "2025-01-15", "日本語", "任务描述 🎉")];
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains("日本語"));
+        assert!(html.contains("任务描述"));
+    }
+
+    #[test]
+    fn test_render_page_many_entries() {
+        let entries: Vec<HomeworkEntry> = (0..100)
+            .map(|i| {
+                make_entry(
+                    "compiti",
+                    &format!("2025-01-{:02}", (i % 28) + 1),
+                    &format!("SUBJECT_{}", i),
+                    &format!("Task {}", i),
+                )
+            })
+            .collect();
+
+        let html = render_page(&entries).into_string();
+
+        assert!(html.contains(">100<")); // Total count
+        assert!(html.contains("SUBJECT_0"));
+        assert!(html.contains("SUBJECT_99"));
+    }
+}

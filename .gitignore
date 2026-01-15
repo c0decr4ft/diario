@@ -6,6 +6,10 @@ data/*.xlsx
 homework.json
 index.html
 
+# Coverage reports
+coverage.json
+lcov.info
+
 # Rust build
 /target/
 Cargo.lock
