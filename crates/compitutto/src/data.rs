@@ -16,11 +16,17 @@ pub fn is_test_or_quiz(entry: &HomeworkEntry) -> bool {
     TEST_KEYWORDS.iter().any(|kw| task_lower.contains(kw))
 }
 
-/// Generate study sessions for a test entry
+/// Generate study sessions for a test entry.
 ///
-/// Creates up to 4 study session entries on the days leading up to the test.
-/// Each study session links back to its parent test via `parent_id`.
-pub fn generate_study_sessions(test: &HomeworkEntry, today: NaiveDate) -> Vec<HomeworkEntry> {
+/// Creates up to `study_days_before` session entries on the days leading up to
+/// the test (minimum 3). Each session links back to its parent via `parent_id`.
+pub fn generate_study_sessions(
+    test: &HomeworkEntry,
+    today: NaiveDate,
+    study_days_before: u32,
+) -> Vec<HomeworkEntry> {
+    let study_days_before = study_days_before.max(3) as i64;
+
     let test_date = match NaiveDate::parse_from_str(&test.date, "%Y-%m-%d") {
         Ok(d) => d,
         Err(_) => return Vec::new(),
@@ -33,8 +39,8 @@ pub fn generate_study_sessions(test: &HomeworkEntry, today: NaiveDate) -> Vec<Ho
         return Vec::new();
     }
 
-    // Generate up to 4 days before, but only for future dates
-    let days_to_generate = std::cmp::min(4, days_until - 1) as usize;
+    // Generate up to study_days_before days before, but only for future dates
+    let days_to_generate = std::cmp::min(study_days_before, days_until - 1) as usize;
 
     // Truncate task to 100 chars for study session text
     let truncated_task = if test.task.len() > 100 {
@@ -78,6 +84,94 @@ fn compute_study_session_id(parent_id: &str, days_before: usize) -> String {
     days_before.hash(&mut hasher);
     "study".hash(&mut hasher);
     format!("study_{:016x}", hasher.finish())
+}
+
+/// Find the last allowed work day that is at least `min_days_before` before `due_date`.
+///
+/// `work_days` is a list of weekday numbers (1=Mon … 5=Fri).
+/// Weekends (0=Sun, 6=Sat via chrono) are always allowed.
+/// Returns `None` if no suitable day exists within a 14-day look-back window.
+pub fn find_work_day_before(
+    due_date: NaiveDate,
+    min_days_before: i64,
+    work_days: &[u32],
+) -> Option<NaiveDate> {
+    use chrono::Datelike;
+    let latest = due_date - chrono::Duration::days(min_days_before);
+    // Walk backwards from `latest` up to 14 days looking for an allowed day
+    for offset in 0..14i64 {
+        let candidate = latest - chrono::Duration::days(offset);
+        let wd = candidate.weekday().number_from_monday(); // 1=Mon … 7=Sun
+                                                           // Treat 6=Sat, 7=Sun as always allowed; weekdays must be in work_days
+        let allowed = wd >= 6 || work_days.contains(&wd);
+        if allowed {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Generate a "work on this" reminder entry for a `compiti` homework entry.
+///
+/// Places the reminder on the last allowed work day at least `days_ahead` days
+/// before the due date. `days_ahead` is 1 or 2 (user setting, default 2).
+/// Links back to the parent via `parent_id`.
+/// Returns `None` if the due date is too soon or already past.
+pub fn generate_work_reminder(
+    entry: &HomeworkEntry,
+    today: NaiveDate,
+    work_days: &[u32],
+    days_ahead: u32,
+) -> Option<HomeworkEntry> {
+    // Only for compiti
+    if entry.entry_type != "compiti" {
+        return None;
+    }
+
+    let days_ahead = days_ahead.clamp(1, 2) as i64;
+    let due_date = NaiveDate::parse_from_str(&entry.date, "%Y-%m-%d").ok()?;
+
+    // Must be far enough in the future to have time to prepare
+    if (due_date - today).num_days() < days_ahead {
+        return None;
+    }
+
+    let work_date = find_work_day_before(due_date, days_ahead, work_days)?;
+
+    // Don't generate if the work day is in the past
+    if work_date < today {
+        return None;
+    }
+
+    let date_str = work_date.format("%Y-%m-%d").to_string();
+    let task_str = format!("Do homework: {}", entry.task);
+    let id = compute_work_reminder_id(&entry.id);
+    let source_id = HomeworkEntry::generate_source_id(&date_str, &entry.subject, &task_str);
+    let now = chrono::Utc::now().to_rfc3339();
+
+    Some(HomeworkEntry {
+        id,
+        source_id: Some(source_id),
+        entry_type: "lavoro".to_string(),
+        date: date_str,
+        subject: entry.subject.clone(),
+        task: task_str,
+        completed: false,
+        position: 0,
+        parent_id: Some(entry.id.clone()),
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+/// Compute a deterministic ID for a work reminder based on the parent entry ID.
+fn compute_work_reminder_id(parent_id: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    parent_id.hash(&mut hasher);
+    "lavoro".hash(&mut hasher);
+    format!("lavoro_{:016x}", hasher.finish())
 }
 
 /// Parse all export files and return the entries.
@@ -344,7 +438,7 @@ mod tests {
         let test = make_entry("compiti", "2025-01-20", "Matematica", "Verifica sui limiti");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        let sessions = generate_study_sessions(&test, today);
+        let sessions = generate_study_sessions(&test, today, 4);
 
         // 5 days away, should generate 4 study sessions
         assert_eq!(sessions.len(), 4);
@@ -369,7 +463,7 @@ mod tests {
         let test = make_entry("compiti", "2025-01-17", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        let sessions = generate_study_sessions(&test, today);
+        let sessions = generate_study_sessions(&test, today, 4);
 
         // 2 days away, should generate 1 study session (day before)
         assert_eq!(sessions.len(), 1);
@@ -381,7 +475,7 @@ mod tests {
         let test = make_entry("compiti", "2025-01-16", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        let sessions = generate_study_sessions(&test, today);
+        let sessions = generate_study_sessions(&test, today, 4);
 
         // Only 1 day away, no time for study sessions
         assert!(sessions.is_empty());
@@ -392,7 +486,7 @@ mod tests {
         let test = make_entry("compiti", "2025-01-10", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        let sessions = generate_study_sessions(&test, today);
+        let sessions = generate_study_sessions(&test, today, 4);
 
         // Test is in the past
         assert!(sessions.is_empty());
@@ -404,7 +498,7 @@ mod tests {
         let test = make_entry("compiti", "2025-01-20", "Matematica", &long_task);
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        let sessions = generate_study_sessions(&test, today);
+        let sessions = generate_study_sessions(&test, today, 4);
 
         // Task should be truncated with "..."
         assert!(sessions[0].task.len() < 150);
@@ -416,8 +510,8 @@ mod tests {
         let test = make_entry("compiti", "2025-01-20", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        let sessions1 = generate_study_sessions(&test, today);
-        let sessions2 = generate_study_sessions(&test, today);
+        let sessions1 = generate_study_sessions(&test, today, 4);
+        let sessions2 = generate_study_sessions(&test, today, 4);
 
         // IDs should be the same for the same test
         for (s1, s2) in sessions1.iter().zip(sessions2.iter()) {
@@ -430,7 +524,7 @@ mod tests {
         let test = make_entry("compiti", "invalid-date", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        let sessions = generate_study_sessions(&test, today);
+        let sessions = generate_study_sessions(&test, today, 4);
 
         // Should return empty for invalid date
         assert!(sessions.is_empty());
@@ -441,7 +535,7 @@ mod tests {
         let test = make_entry("compiti", "2025-01-20", "Matematica", "Verifica");
         let today = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
 
-        let sessions = generate_study_sessions(&test, today);
+        let sessions = generate_study_sessions(&test, today, 4);
 
         // All study sessions should be marked as generated
         for session in &sessions {

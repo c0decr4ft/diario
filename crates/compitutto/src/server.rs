@@ -2,7 +2,7 @@ use axum::{
     extract::{Path as AxumPath, State},
     http::StatusCode,
     response::{Html, IntoResponse},
-    routing::{delete, get},
+    routing::{delete, get, post},
     Json, Router,
 };
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode, DebounceEventResult};
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tracing::{debug, error, info};
 
-use crate::data::{self, generate_study_sessions, is_test_or_quiz};
+use crate::data::{self, generate_study_sessions, generate_work_reminder, is_test_or_quiz};
 use crate::db::{self, EntryUpdate};
 use crate::html;
 use crate::types::HomeworkEntry;
@@ -82,6 +82,20 @@ pub fn create_router(state: Arc<AppState>) -> Router {
         .route("/api/entries/{id}/children", get(get_children_handler))
         .route("/api/entries/{id}/cascade", delete(cascade_delete_handler))
         .route("/api/refresh", get(refresh_handler))
+        .route("/api/reprocess", post(reprocess_handler))
+        .route("/settings", get(settings_page_handler))
+        .route(
+            "/api/settings/work-days",
+            get(get_work_days_handler).put(set_work_days_handler),
+        )
+        .route(
+            "/api/settings/homework-days-ahead",
+            get(get_homework_days_ahead_handler).put(set_homework_days_ahead_handler),
+        )
+        .route(
+            "/api/settings/study-days-before",
+            get(get_study_days_before_handler).put(set_study_days_before_handler),
+        )
         .with_state(state)
 }
 
@@ -105,21 +119,37 @@ pub fn init_server_state(output_dir: PathBuf) -> anyhow::Result<Arc<AppState>> {
                 info!(count = imported, "Imported entries from exports");
             }
 
-            // Generate study sessions for any tests
             let today = chrono::Local::now().date_naive();
+            let work_days = db::get_work_days(&conn).unwrap_or_else(|_| vec![1, 2, 3, 4, 5]);
+            let days_ahead = db::get_homework_days_ahead(&conn).unwrap_or(2);
+            let study_days = db::get_study_days_before(&conn).unwrap_or(4);
+
+            // Generate auto-entries (study sessions + work reminders) from the
+            // DB entries so parent_id references are always valid.
+            let db_entries = db::get_all_entries(&conn)?;
             let mut study_sessions_created = 0;
-            for entry in &entries {
+            let mut work_reminders_created = 0;
+            for entry in &db_entries {
                 if is_test_or_quiz(entry) {
-                    let sessions = generate_study_sessions(entry, today);
+                    let sessions = generate_study_sessions(entry, today, study_days);
                     for session in sessions {
                         if db::insert_entry_if_not_exists(&conn, &session)? {
                             study_sessions_created += 1;
                         }
                     }
                 }
+                if let Some(reminder) = generate_work_reminder(entry, today, &work_days, days_ahead)
+                {
+                    if db::insert_entry_if_not_exists(&conn, &reminder)? {
+                        work_reminders_created += 1;
+                    }
+                }
             }
             if study_sessions_created > 0 {
                 info!(count = study_sessions_created, "Created study sessions");
+            }
+            if work_reminders_created > 0 {
+                info!(count = work_reminders_created, "Created work reminders");
             }
         }
         Err(e) => {
@@ -230,14 +260,21 @@ pub fn process_refresh(state: &AppState) -> RefreshResult {
         Ok(entries) => {
             let imported = db::import_entries(&conn, &entries).unwrap_or(0);
 
-            // Generate study sessions for any new tests
             let today = chrono::Local::now().date_naive();
-            for entry in &entries {
+            let work_days = db::get_work_days(&conn).unwrap_or_else(|_| vec![1, 2, 3, 4, 5]);
+            let days_ahead = db::get_homework_days_ahead(&conn).unwrap_or(2);
+            let study_days = db::get_study_days_before(&conn).unwrap_or(4);
+            let db_entries = db::get_all_entries(&conn).unwrap_or_default();
+            for entry in &db_entries {
                 if is_test_or_quiz(entry) {
-                    let sessions = generate_study_sessions(entry, today);
+                    let sessions = generate_study_sessions(entry, today, study_days);
                     for session in sessions {
                         let _ = db::insert_entry_if_not_exists(&conn, &session);
                     }
+                }
+                if let Some(reminder) = generate_work_reminder(entry, today, &work_days, days_ahead)
+                {
+                    let _ = db::insert_entry_if_not_exists(&conn, &reminder);
                 }
             }
 
@@ -377,12 +414,22 @@ async fn create_entry_handler(
 
     match db::insert_entry(&conn, &entry) {
         Ok(()) => {
-            // If it's a test, generate study sessions
-            if is_test_or_quiz(&entry) {
+            // If it's a test/compiti, generate study sessions / work reminders
+            {
                 let today = chrono::Local::now().date_naive();
-                let sessions = generate_study_sessions(&entry, today);
-                for session in sessions {
-                    let _ = db::insert_entry_if_not_exists(&conn, &session);
+                let work_days = db::get_work_days(&conn).unwrap_or_else(|_| vec![1, 2, 3, 4, 5]);
+                let days_ahead = db::get_homework_days_ahead(&conn).unwrap_or(2);
+                let study_days = db::get_study_days_before(&conn).unwrap_or(4);
+                if is_test_or_quiz(&entry) {
+                    let sessions = generate_study_sessions(&entry, today, study_days);
+                    for session in sessions {
+                        let _ = db::insert_entry_if_not_exists(&conn, &session);
+                    }
+                }
+                if let Some(reminder) =
+                    generate_work_reminder(&entry, today, &work_days, days_ahead)
+                {
+                    let _ = db::insert_entry_if_not_exists(&conn, &reminder);
                 }
             }
             debug!(id = %entry.id, subject = %entry.subject, "Entry created");
@@ -503,25 +550,34 @@ async fn refresh_handler(State(state): State<Arc<AppState>>) -> impl IntoRespons
     match data::parse_all_exports() {
         Ok(entries) => {
             let imported = db::import_entries(&conn, &entries).unwrap_or(0);
-
-            // Generate study sessions for any new tests
             let today = chrono::Local::now().date_naive();
+            let work_days = db::get_work_days(&conn).unwrap_or_else(|_| vec![1, 2, 3, 4, 5]);
+            let days_ahead = db::get_homework_days_ahead(&conn).unwrap_or(2);
+            let study_days = db::get_study_days_before(&conn).unwrap_or(4);
+            let db_entries = db::get_all_entries(&conn).unwrap_or_default();
             let mut study_sessions_created = 0;
-            for entry in &entries {
+            let mut work_reminders_created = 0;
+            for entry in &db_entries {
                 if is_test_or_quiz(entry) {
-                    let sessions = generate_study_sessions(entry, today);
+                    let sessions = generate_study_sessions(entry, today, study_days);
                     for session in sessions {
                         if db::insert_entry_if_not_exists(&conn, &session).unwrap_or(false) {
                             study_sessions_created += 1;
                         }
                     }
                 }
+                if let Some(reminder) = generate_work_reminder(entry, today, &work_days, days_ahead)
+                {
+                    if db::insert_entry_if_not_exists(&conn, &reminder).unwrap_or(false) {
+                        work_reminders_created += 1;
+                    }
+                }
             }
-
-            if imported > 0 || study_sessions_created > 0 {
+            if imported > 0 || study_sessions_created > 0 || work_reminders_created > 0 {
                 info!(
-                    imported = imported,
+                    imported,
                     study_sessions = study_sessions_created,
+                    work_reminders = work_reminders_created,
                     "Refresh complete"
                 );
             }
@@ -531,6 +587,159 @@ async fn refresh_handler(State(state): State<Arc<AppState>>) -> impl IntoRespons
             error!(error = %e, "Refresh failed");
             "ERROR"
         }
+    }
+}
+
+// ========== Reprocess handler ==========
+
+/// Delete all future auto-generated entries and regenerate them using the
+/// current settings (work days, homework_days_ahead, study_days_before).
+/// Past entries and their completed state are never touched.
+async fn reprocess_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let conn = state.conn.lock().unwrap();
+    let today = chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+
+    // 1. Delete future generated entries
+    let deleted = match db::delete_future_generated_entries(&conn, &today) {
+        Ok(n) => n,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to delete generated entries: {}", e),
+            )
+                .into_response();
+        }
+    };
+    info!(deleted, "Deleted future generated entries for reprocess");
+
+    // 2. Regenerate from all current DB entries
+    let today_naive = chrono::Local::now().date_naive();
+    let work_days = db::get_work_days(&conn).unwrap_or_else(|_| vec![1, 2, 3, 4, 5]);
+    let days_ahead = db::get_homework_days_ahead(&conn).unwrap_or(2);
+    let study_days = db::get_study_days_before(&conn).unwrap_or(4);
+
+    let db_entries = match db::get_all_entries(&conn) {
+        Ok(e) => e,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to load entries: {}", e),
+            )
+                .into_response();
+        }
+    };
+
+    let mut created = 0usize;
+    for entry in &db_entries {
+        if is_test_or_quiz(entry) {
+            let sessions = generate_study_sessions(entry, today_naive, study_days);
+            for session in sessions {
+                if db::insert_entry_if_not_exists(&conn, &session).unwrap_or(false) {
+                    created += 1;
+                }
+            }
+        }
+        if let Some(reminder) = generate_work_reminder(entry, today_naive, &work_days, days_ahead) {
+            if db::insert_entry_if_not_exists(&conn, &reminder).unwrap_or(false) {
+                created += 1;
+            }
+        }
+    }
+
+    info!(deleted, created, "Reprocess complete");
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "deleted": deleted, "created": created })),
+    )
+        .into_response()
+}
+
+// ========== Settings handlers ==========
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkDaysRequest {
+    days: Vec<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkDaysResponse {
+    days: Vec<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SingleValueRequest {
+    value: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SingleValueResponse {
+    value: u32,
+}
+
+async fn settings_page_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let conn = state.conn.lock().unwrap();
+    let work_days = db::get_work_days(&conn).unwrap_or_else(|_| vec![1, 2, 3, 4, 5]);
+    let days_ahead = db::get_homework_days_ahead(&conn).unwrap_or(2);
+    let study_days = db::get_study_days_before(&conn).unwrap_or(4);
+    Html(html::render_settings_page(
+        &work_days, days_ahead, study_days,
+    ))
+}
+
+async fn get_work_days_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let conn = state.conn.lock().unwrap();
+    let days = db::get_work_days(&conn).unwrap_or_else(|_| vec![1, 2, 3, 4, 5]);
+    Json(WorkDaysResponse { days })
+}
+
+async fn set_work_days_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<WorkDaysRequest>,
+) -> impl IntoResponse {
+    let conn = state.conn.lock().unwrap();
+    match db::set_work_days(&conn, &body.days) {
+        Ok(()) => (StatusCode::OK, Json(WorkDaysResponse { days: body.days })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed: {}", e)).into_response(),
+    }
+}
+
+async fn get_homework_days_ahead_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let conn = state.conn.lock().unwrap();
+    let value = db::get_homework_days_ahead(&conn).unwrap_or(2);
+    Json(SingleValueResponse { value })
+}
+
+async fn set_homework_days_ahead_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SingleValueRequest>,
+) -> impl IntoResponse {
+    let conn = state.conn.lock().unwrap();
+    let clamped = body.value.clamp(1, 2);
+    match db::set_homework_days_ahead(&conn, clamped) {
+        Ok(()) => (StatusCode::OK, Json(SingleValueResponse { value: clamped })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed: {}", e)).into_response(),
+    }
+}
+
+async fn get_study_days_before_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let conn = state.conn.lock().unwrap();
+    let value = db::get_study_days_before(&conn).unwrap_or(4);
+    Json(SingleValueResponse { value })
+}
+
+async fn set_study_days_before_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<SingleValueRequest>,
+) -> impl IntoResponse {
+    let conn = state.conn.lock().unwrap();
+    let clamped = body.value.max(3);
+    match db::set_study_days_before(&conn, clamped) {
+        Ok(()) => (StatusCode::OK, Json(SingleValueResponse { value: clamped })).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed: {}", e)).into_response(),
     }
 }
 

@@ -204,7 +204,18 @@ pub fn insert_entry(conn: &Connection, entry: &HomeworkEntry) -> Result<()> {
 /// This allows entries to be moved to different dates while still being
 /// recognized as duplicates during future imports.
 pub fn insert_entry_if_not_exists(conn: &Connection, entry: &HomeworkEntry) -> Result<bool> {
-    // Check if an entry with this source_id already exists
+    // Check if an entry with this id already exists (covers generated entries
+    // whose id is deterministic, e.g. "lavoro_…" and "study_…" prefixes).
+    let id_exists: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM entries WHERE id = ?1",
+        [&entry.id],
+        |row| row.get(0),
+    )?;
+    if id_exists {
+        return Ok(false);
+    }
+
+    // Also check by source_id to catch re-imported export entries.
     if let Some(ref source_id) = entry.source_id {
         let exists: bool = conn.query_row(
             "SELECT COUNT(*) > 0 FROM entries WHERE source_id = ?1",
@@ -362,9 +373,113 @@ pub fn entry_exists(conn: &Connection, id: &str) -> Result<bool> {
 }
 
 /// Count all entries in the database
+/// Delete all future auto-generated entries (lavoro_* and study_* ids) whose
+/// date is today or later. Past completed entries are preserved.
+/// Returns the number of rows deleted.
+pub fn delete_future_generated_entries(conn: &Connection, today: &str) -> Result<usize> {
+    let count = conn.execute(
+        "DELETE FROM entries
+         WHERE date >= ?1
+           AND (id LIKE 'lavoro_%' OR id LIKE 'study_%')",
+        params![today],
+    )?;
+    Ok(count)
+}
+
 pub fn count_entries(conn: &Connection) -> Result<usize> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))?;
     Ok(count as usize)
+}
+
+// ========== Settings ==========
+
+/// Get the list of allowed work-day weekday numbers (1=Mon … 5=Fri).
+/// Weekends (0=Sun, 6=Sat) are always allowed and are not stored here.
+/// Returns the stored list, or the default [1,2,3,4,5] if nothing is stored.
+pub fn get_work_days(conn: &Connection) -> Result<Vec<u32>> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'work_days'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    match result {
+        Some(json) => {
+            let days: Vec<u32> =
+                serde_json::from_str(&json).unwrap_or_else(|_| vec![1, 2, 3, 4, 5]);
+            Ok(days)
+        }
+        None => Ok(vec![1, 2, 3, 4, 5]),
+    }
+}
+
+/// Save the list of allowed work-day weekday numbers.
+/// Only weekdays (1–5) are meaningful; weekends are always allowed.
+pub fn set_work_days(conn: &Connection, days: &[u32]) -> Result<()> {
+    let mut days: Vec<u32> = days
+        .iter()
+        .copied()
+        .filter(|&d| (1..=5).contains(&d))
+        .collect();
+    days.sort();
+    days.dedup();
+    let json = serde_json::to_string(&days)?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('work_days', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![json],
+    )?;
+    Ok(())
+}
+
+/// Get how many days ahead of the due date to place the work reminder (1 or 2).
+/// Default: 2.
+pub fn get_homework_days_ahead(conn: &Connection) -> Result<u32> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'homework_days_ahead'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let v = result.and_then(|s| s.parse::<u32>().ok()).unwrap_or(2);
+    Ok(v.clamp(1, 2))
+}
+
+pub fn set_homework_days_ahead(conn: &Connection, days: u32) -> Result<()> {
+    let days = days.clamp(1, 2);
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('homework_days_ahead', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![days.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Get how many study-session days to generate before a verifica (minimum 3).
+/// Default: 4.
+pub fn get_study_days_before(conn: &Connection) -> Result<u32> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'study_days_before'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let v = result.and_then(|s| s.parse::<u32>().ok()).unwrap_or(4);
+    Ok(v.max(3))
+}
+
+pub fn set_study_days_before(conn: &Connection, days: u32) -> Result<()> {
+    let days = days.max(3);
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('study_days_before', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![days.to_string()],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

@@ -9,7 +9,7 @@ s:
     cargo run -p compitutto --release
 
 # Start server on custom port
-serve port="8080":
+serve port="9000":
     cargo run -p compitutto --release -- serve --port {{port}}
 
 # Build release binary
@@ -35,6 +35,23 @@ status:
 clean:
     cargo clean
     rm -f coverage.json lcov.info
+
+# Reset the database (deletes homework.db — all entries and settings will be lost)
+reset-db:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -f data/homework.db ]; then
+        echo "No database found at data/homework.db — nothing to reset."
+        exit 0
+    fi
+    echo "This will permanently delete data/homework.db and all its contents."
+    read -r -p "Type 'yes' to confirm: " confirm
+    if [ "$confirm" = "yes" ]; then
+        rm data/homework.db
+        echo "Database deleted. It will be recreated fresh on next server start."
+    else
+        echo "Aborted."
+    fi
 
 # Run all CI checks
 ci: fmt-check check lint test
@@ -136,5 +153,5 @@ go:
     echo "Fetching new exports..."
     cargo run -p raschietto --release -- fetch
     echo "Starting server and opening browser..."
-    open http://localhost:8080 2>/dev/null || xdg-open http://localhost:8080 2>/dev/null &
+    open http://localhost:9000 2>/dev/null || xdg-open http://localhost:9000 2>/dev/null &
     cargo run -p compitutto --release

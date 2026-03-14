@@ -32,7 +32,7 @@ enum Commands {
     /// Start the web server (default)
     Serve {
         /// Port to listen on
-        #[arg(short, long, default_value = "8080")]
+        #[arg(short, long, default_value = "9000")]
         port: u16,
     },
 
@@ -63,8 +63,8 @@ async fn main() -> Result<()> {
 
     match args.command {
         // Default to serve if no command specified
-        None | Some(Commands::Serve { port: 8080 }) => {
-            server::serve(8080, args.output).await?;
+        None | Some(Commands::Serve { port: 9000 }) => {
+            server::serve(9000, args.output).await?;
         }
         Some(Commands::Serve { port }) => {
             server::serve(port, args.output).await?;
