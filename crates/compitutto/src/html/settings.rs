@@ -193,7 +193,10 @@ const SETTINGS_CSS: &str = r#"
 
 const SETTINGS_JS: &str = r#"
 document.querySelectorAll('.day-toggle:not(.always-on)').forEach(label => {
-    label.addEventListener('click', () => label.classList.toggle('checked'));
+    label.addEventListener('click', (e) => {
+        e.preventDefault();
+        label.classList.toggle('checked');
+    });
 });
 
 document.querySelectorAll('.radio-option').forEach(label => {
