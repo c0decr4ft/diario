@@ -111,11 +111,11 @@ pub fn render_settings_page(work_days: &[u32], days_ahead: u32, study_days: u32)
                             span #"save-status" {}
                         }
 
-                        // ── Reprocess ──────────────────────────────────────
-                        section.settings-section {
+                        // ── Reprocess (hidden until settings are saved) ────
+                        section.settings-section #"reprocess-section" style="display:none;margin-top:40px" {
                             h3 { "Reprocess future events" }
                             p.settings-desc {
-                                "After changing settings, click this to delete and regenerate all "
+                                "Your settings were saved. Click below to delete and regenerate all "
                                 "future \"Do it\" reminders and study sessions using your new settings. "
                                 "Past entries and their completed state are never affected."
                             }
@@ -241,6 +241,8 @@ document.getElementById('study-days-inc').addEventListener('click', () => {
     studyDaysEl.dataset.value = v + 1; studyDaysEl.textContent = v + 1;
 });
 
+const reprocessSection = document.getElementById('reprocess-section');
+
 document.getElementById('reprocess-btn').addEventListener('click', async () => {
     const status = document.getElementById('reprocess-status');
     const btn = document.getElementById('reprocess-btn');
@@ -251,7 +253,11 @@ document.getElementById('reprocess-btn').addEventListener('click', async () => {
         if (res.ok) {
             const data = await res.json();
             status.textContent = `✓ Done — removed ${data.deleted}, created ${data.created}`;
-            setTimeout(() => { status.textContent = ''; }, 5000);
+            // Hide the section again once reprocessed
+            setTimeout(() => {
+                status.textContent = '';
+                reprocessSection.style.display = 'none';
+            }, 4000);
         } else {
             status.textContent = '✗ Error reprocessing';
         }
@@ -295,6 +301,9 @@ document.getElementById('save-settings').addEventListener('click', async () => {
         if (results.every(r => r.ok)) {
             status.textContent = '✓ Saved';
             setTimeout(() => { status.textContent = ''; }, 3000);
+            // Reveal the reprocess section now that settings changed
+            reprocessSection.style.display = 'block';
+            reprocessSection.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } else {
             status.textContent = '✗ Error saving one or more settings';
         }
