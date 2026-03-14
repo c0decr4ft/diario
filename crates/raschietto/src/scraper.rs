@@ -19,6 +19,8 @@ mod selectors {
     pub const LOGIN_USERNAME: &str = "#login";
     pub const LOGIN_PASSWORD: &str = "#password";
     pub const LOGIN_SUBMIT: &str = "button[type='submit']";
+    /// "Continua senza associare l'email" skip link on the post-login nag screen.
+    pub const SKIP_EMAIL_LINK: &str = "a:has-text('Continua senza associare')";
     /// Export button - an <a> tag with class "export" and alt="scarica"
     pub const EXPORT_BUTTON: &str = "a.export[alt='scarica']";
     pub const EXPORT_DIALOG: &str = "div.ui-dialog[role='dialog']";
@@ -110,12 +112,49 @@ impl ClasseVivaScraper {
             .await
             .context("Failed to click login button")?;
 
-        // Wait for navigation to complete (either success or error)
-        // We wait for the agenda page to load by checking for the export button
+        // After submitting, the page navigates. Wait for that navigation to
+        // settle, then check whether the email nag screen appeared.
+        info!("Login submitted, waiting for post-login page");
+
+        // Wait for the page to finish loading after the redirect.
         tokio::time::sleep(Duration::from_secs(2)).await;
 
-        info!("Login submitted, waiting for page to load");
+        self.dismiss_email_nag(&page).await?;
+
         Ok(page)
+    }
+
+    /// After login, Classe Viva sometimes shows an "associate your email" nag
+    /// screen before the agenda. Detect it by looking for the skip link with a
+    /// short timeout — if the selector doesn't appear within 5 s we're already
+    /// on the agenda and can move on.
+    async fn dismiss_email_nag(&self, page: &Page) -> Result<()> {
+        debug!("Checking for email nag screen");
+
+        // 5 000 ms timeout: enough time for the nag to render if it's coming,
+        // short enough not to add painful delay when it isn't there.
+        let found = page
+            .wait_for_selector_builder(selectors::SKIP_EMAIL_LINK)
+            .timeout(5_000f64)
+            .wait_for_selector()
+            .await;
+
+        match found {
+            Ok(Some(_)) => {
+                info!("Email nag screen detected — clicking skip link");
+                page.click_builder(selectors::SKIP_EMAIL_LINK)
+                    .click()
+                    .await
+                    .context("Failed to click 'Continua senza associare l'email'")?;
+                info!("Email nag dismissed");
+            }
+            // Selector not found within timeout → already on the agenda page.
+            Ok(None) | Err(_) => {
+                debug!("No email nag screen — proceeding to agenda");
+            }
+        }
+
+        Ok(())
     }
 
     /// Open the export dialog on the agenda page.
@@ -212,8 +251,13 @@ impl ClasseVivaScraper {
 
     /// Trigger the download and save the file.
     ///
-    /// Uses reqwest to download the file directly after capturing the download URL
-    /// from Playwright. This works around bugs in playwright-rust's download API.
+    /// The site's download behaviour has varied over time:
+    ///   - Older: a popup window opens, the download fires inside the popup.
+    ///   - Newer: the download fires directly on the main page.
+    ///
+    /// We arm both listeners before clicking Confirm, then race them with
+    /// `tokio::select!`. Whichever fires first wins; we extract the Download
+    /// from it and save via Playwright's built-in handling.
     ///
     /// Returns the path to the downloaded file.
     pub async fn trigger_download(&self, page: &Page, output_dir: &Path) -> Result<PathBuf> {
@@ -227,57 +271,90 @@ impl ClasseVivaScraper {
             .context("Failed to resolve output directory path")?
             .join(&filename);
 
-        // Start listening for download event before clicking
-        let download_future = page.expect_event(EventType::Download);
+        // Arm both listeners BEFORE clicking so we don't miss the event.
+        let direct_download_future = page.expect_event(EventType::Download);
+        let popup_future = page.expect_event(EventType::Popup);
 
-        // Click confirm button to trigger download
+        // Click confirm to trigger whichever download mechanism the site uses.
         debug!("Clicking confirm button");
         page.click_builder(selectors::CONFIRM_BUTTON)
             .click()
             .await
             .context("Failed to click confirm button")?;
 
-        // Wait for the download event to get the URL
-        debug!("Waiting for download event");
-        let event = tokio::time::timeout(Duration::from_secs(30), download_future)
-            .await
-            .context("Timeout waiting for download")?
-            .context("Failed to receive download event")?;
-
-        // Extract the download URL from the event
-        let download = match event {
-            Event::Download(d) => d,
-            _ => return Err(anyhow!("Unexpected event type, expected Download")),
+        // Race: direct download on this page vs popup opening.
+        let download = tokio::select! {
+            // Case 1: download fires directly on the main page (newer behaviour).
+            result = direct_download_future => {
+                let event = result.context("Error waiting for direct download event")?;
+                match event {
+                    Event::Download(d) => {
+                        info!("Direct download started: {} ({})", d.suggested_filename(), d.url());
+                        d
+                    }
+                    _ => return Err(anyhow!("Unexpected event, expected Download")),
+                }
+            }
+            // Case 2: a popup opens first, then the download fires inside it (older behaviour).
+            result = popup_future => {
+                let event = result.context("Error waiting for popup event")?;
+                let popup = match event {
+                    Event::Popup(p) => {
+                        info!("Popup window opened — waiting for download inside it");
+                        p
+                    }
+                    _ => return Err(anyhow!("Unexpected event, expected Popup")),
+                };
+                let dl_event = tokio::time::timeout(
+                    Duration::from_secs(30),
+                    popup.expect_event(EventType::Download),
+                )
+                .await
+                .context("Timeout waiting for download from popup")?
+                .context("Error waiting for download event from popup")?;
+                match dl_event {
+                    Event::Download(d) => {
+                        info!("Popup download started: {} ({})", d.suggested_filename(), d.url());
+                        d
+                    }
+                    _ => return Err(anyhow!("Unexpected event from popup, expected Download")),
+                }
+            }
         };
 
+        // Playwright's download interception is unreliable in headed mode —
+        // the browser's native download manager takes over and saves to
+        // ~/Downloads instead. Instead we grab the URL and cookies from the
+        // Download event and fetch the file ourselves with reqwest.
         let download_url = download.url().to_string();
-        info!("Download URL captured: {}", download_url);
 
-        // Get cookies from browser context for authentication
-        debug!("Extracting cookies from browser");
+        // Extract cookies from the browser context for authentication.
         let cookies = self
             .context
             .cookies(&[AGENDA_URL.to_string()])
             .await
-            .context("Failed to get cookies")?;
+            .context("Failed to get cookies from browser")?;
 
-        // Build cookie header string
         let cookie_header: String = cookies
             .iter()
             .map(|c| format!("{}={}", c.name, c.value))
             .collect::<Vec<_>>()
             .join("; ");
 
-        debug!("Using {} cookies for download", cookies.len());
+        debug!("Fetching file via reqwest ({} cookies)", cookies.len());
 
-        // Download the file directly with reqwest
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .use_rustls_tls()
+            .build()
+            .context("Failed to build HTTP client")?;
+
         let response = client
             .get(&download_url)
-            .header("Cookie", cookie_header)
+            .header("Cookie", &cookie_header)
+            .header("Referer", AGENDA_URL)
             .send()
             .await
-            .context("Failed to request download")?;
+            .context("Failed to fetch download URL")?;
 
         if !response.status().is_success() {
             return Err(anyhow!(
@@ -289,16 +366,12 @@ impl ClasseVivaScraper {
         let bytes = response
             .bytes()
             .await
-            .context("Failed to read download response")?;
+            .context("Failed to read download response body")?;
 
-        // Save to file
-        std::fs::write(&output_path, &bytes).context("Failed to write download file")?;
+        std::fs::write(&output_path, &bytes)
+            .context("Failed to write downloaded file")?;
 
-        info!(
-            "Download saved to: {:?} ({} bytes)",
-            output_path,
-            bytes.len()
-        );
+        info!("Download saved to: {:?} ({} bytes)", output_path, bytes.len());
         Ok(output_path)
     }
 

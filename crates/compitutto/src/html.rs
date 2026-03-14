@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::NaiveDate;
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 use std::collections::BTreeMap;
 use std::fs;
@@ -159,7 +160,10 @@ fn render_date_group(date: &str, items: &[&HomeworkEntry]) -> Markup {
         div class=(group_class) data-date=(date) {
             div.date-header {
                 span.collapse-indicator { "▼" }
-                "📅 " (date)
+                "📅 "
+                (NaiveDate::parse_from_str(date, "%Y-%m-%d")
+                    .map(|d| format!("{} {}", d.format("%A"), date))
+                    .unwrap_or_else(|_| date.to_string()))
             }
             div.date-items {
             @for item in items.iter() {

@@ -9,7 +9,7 @@ s:
     cargo run -p compitutto --release
 
 # Start server on custom port
-serve port="8080":
+serve port="9000":
     cargo run -p compitutto --release -- serve --port {{port}}
 
 # Build release binary
@@ -136,5 +136,5 @@ go:
     echo "Fetching new exports..."
     cargo run -p raschietto --release -- fetch
     echo "Starting server and opening browser..."
-    open http://localhost:8080 2>/dev/null || xdg-open http://localhost:8080 2>/dev/null &
+    open http://localhost:9000 2>/dev/null || xdg-open http://localhost:9000 2>/dev/null &
     cargo run -p compitutto --release
