@@ -395,7 +395,6 @@ pub fn get_work_days(conn: &Connection) -> Result<Vec<u32>> {
 /// Save the list of allowed work-day weekday numbers.
 /// Only weekdays (1–5) are meaningful; weekends are always allowed.
 pub fn set_work_days(conn: &Connection, days: &[u32]) -> Result<()> {
-    // Clamp to valid weekdays only
     let mut days: Vec<u32> = days.iter().copied().filter(|&d| (1..=5).contains(&d)).collect();
     days.sort();
     days.dedup();
@@ -404,6 +403,58 @@ pub fn set_work_days(conn: &Connection, days: &[u32]) -> Result<()> {
         "INSERT INTO settings (key, value) VALUES ('work_days', ?1)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
         params![json],
+    )?;
+    Ok(())
+}
+
+/// Get how many days ahead of the due date to place the work reminder (1 or 2).
+/// Default: 2.
+pub fn get_homework_days_ahead(conn: &Connection) -> Result<u32> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'homework_days_ahead'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let v = result
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(2);
+    Ok(v.clamp(1, 2))
+}
+
+pub fn set_homework_days_ahead(conn: &Connection, days: u32) -> Result<()> {
+    let days = days.clamp(1, 2);
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('homework_days_ahead', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![days.to_string()],
+    )?;
+    Ok(())
+}
+
+/// Get how many study-session days to generate before a verifica (minimum 3).
+/// Default: 4.
+pub fn get_study_days_before(conn: &Connection) -> Result<u32> {
+    let result: Option<String> = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'study_days_before'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let v = result
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(4);
+    Ok(v.max(3))
+}
+
+pub fn set_study_days_before(conn: &Connection, days: u32) -> Result<()> {
+    let days = days.max(3);
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('study_days_before', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![days.to_string()],
     )?;
     Ok(())
 }

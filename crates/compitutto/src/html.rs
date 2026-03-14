@@ -2069,8 +2069,8 @@ document.addEventListener('click', function(e) {
 "#;
 
 /// Render the settings page as a full HTML string.
-pub fn render_settings_page(work_days: &[u32]) -> String {
-    let days: &[(u32, &str)] = &[
+pub fn render_settings_page(work_days: &[u32], days_ahead: u32, study_days: u32) -> String {
+    let weekdays: &[(u32, &str)] = &[
         (1u32, "Monday"),
         (2u32, "Tuesday"),
         (3u32, "Wednesday"),
@@ -2099,16 +2099,16 @@ pub fn render_settings_page(work_days: &[u32]) -> String {
                     }
                     div.settings-page {
                         h2 { "Settings" }
+
+                        // ── Work days ──────────────────────────────────────
                         section.settings-section {
                             h3 { "Work days" }
                             p.settings-desc {
                                 "Select the days your child can work on homework. "
-                                "Work reminders for compiti will be placed on the last available work day "
-                                "at least two days before the due date. "
-                                "Weekends are always available."
+                                "Weekends are always available and can't be disabled."
                             }
                             div.work-days-grid {
-                                @for (num, name) in days {
+                                @for (num, name) in weekdays {
                                     @let checked = work_days.contains(num);
                                     label class={"day-toggle" @if checked { " checked" }} {
                                         input
@@ -2131,10 +2131,48 @@ pub fn render_settings_page(work_days: &[u32]) -> String {
                                     span.always-badge { "always" }
                                 }
                             }
-                            div.settings-actions {
-                                button #"save-settings" type="button" { "Save" }
-                                span #"save-status" {}
+                        }
+
+                        // ── Homework reminder timing ───────────────────────
+                        section.settings-section {
+                            h3 { "Homework reminder timing" }
+                            p.settings-desc {
+                                "How many days before the due date should the "
+                                "\"Do it\" reminder appear?"
                             }
+                            div.radio-group {
+                                @for (val, label) in &[(1u32, "1 day before"), (2u32, "2 days before")] {
+                                    label class={"radio-option" @if days_ahead == *val { " checked" }} {
+                                        input
+                                            type="radio"
+                                            name="days_ahead"
+                                            value=(val)
+                                            checked[days_ahead == *val];
+                                        span { (label) }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Study session days ─────────────────────────────
+                        section.settings-section {
+                            h3 { "Study days before a verifica" }
+                            p.settings-desc {
+                                "How many study-session reminders to generate before a test. "
+                                "Minimum is 3."
+                            }
+                            div.stepper-row {
+                                button #"study-days-dec" type="button" { "−" }
+                                span #"study-days-value" data-value=(study_days) { (study_days) }
+                                button #"study-days-inc" type="button" { "+" }
+                                span.stepper-hint { "(min 3)" }
+                            }
+                        }
+
+                        // ── Save ───────────────────────────────────────────
+                        div.settings-actions {
+                            button #"save-settings" type="button" { "Save all settings" }
+                            span #"save-status" {}
                         }
                     }
                 }
@@ -2159,72 +2197,131 @@ const SETTINGS_CSS: &str = r#"
 .nav-link:hover { background: rgba(255,255,255,0.1); }
 .settings-page { max-width: 600px; padding-top: 40px; }
 .settings-page h2 { font-size: 1.8em; font-weight: 900; margin-bottom: 30px; }
-.settings-section { margin-bottom: 40px; }
+.settings-section { margin-bottom: 40px; border-bottom: 1px solid rgba(255,255,255,0.07); padding-bottom: 32px; }
 .settings-section h3 { font-size: 1.1em; font-weight: 700; margin-bottom: 10px; color: #fff; }
-.settings-desc { color: #aaa; font-size: 0.9em; line-height: 1.6; margin-bottom: 24px; }
-.work-days-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+.settings-desc { color: #aaa; font-size: 0.9em; line-height: 1.6; margin-bottom: 20px; }
+
+/* Work days grid */
+.work-days-grid { display: flex; flex-wrap: wrap; gap: 12px; }
 .day-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    display: flex; align-items: center; gap: 8px;
     padding: 10px 18px;
     border: 1px solid rgba(255,255,255,0.15);
     border-radius: 6px;
-    cursor: pointer;
-    user-select: none;
+    cursor: pointer; user-select: none;
     transition: all 0.15s;
     background: rgba(255,255,255,0.04);
 }
 .day-toggle input[type="checkbox"] { display: none; }
-.day-toggle:hover { border-color: rgba(255,170,0,0.5); background: rgba(255,170,0,0.08); }
-.day-toggle.checked {
-    border-color: #ffaa00;
-    background: rgba(255,170,0,0.15);
-    box-shadow: 0 0 8px rgba(255,170,0,0.3);
-}
-.day-toggle.always-on { opacity: 0.5; cursor: default; border-color: rgba(255,255,255,0.08); }
+.day-toggle:not(.always-on):hover { border-color: rgba(255,170,0,0.5); background: rgba(255,170,0,0.08); }
+.day-toggle.checked { border-color: #ffaa00; background: rgba(255,170,0,0.15); box-shadow: 0 0 8px rgba(255,170,0,0.3); }
+.day-toggle.always-on { opacity: 0.45; cursor: default; border-color: rgba(255,255,255,0.08); }
 .always-badge { font-size: 0.65em; text-transform: uppercase; letter-spacing: 0.08em; color: #888; margin-left: 4px; }
-.settings-actions { display: flex; align-items: center; gap: 16px; }
-#save-settings {
-    padding: 10px 28px;
-    background: linear-gradient(135deg, #ffaa00, #ff6600);
-    color: #000;
-    font-weight: 900;
-    border: none;
+
+/* Radio options */
+.radio-group { display: flex; gap: 12px; flex-wrap: wrap; }
+.radio-option {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 20px;
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 6px;
+    cursor: pointer; user-select: none;
+    transition: all 0.15s;
+    background: rgba(255,255,255,0.04);
+}
+.radio-option input[type="radio"] { display: none; }
+.radio-option:hover { border-color: rgba(255,170,0,0.5); background: rgba(255,170,0,0.08); }
+.radio-option.checked { border-color: #ffaa00; background: rgba(255,170,0,0.15); box-shadow: 0 0 8px rgba(255,170,0,0.3); }
+
+/* Stepper */
+.stepper-row { display: flex; align-items: center; gap: 16px; }
+.stepper-row button {
+    width: 36px; height: 36px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.2);
     border-radius: 4px;
-    cursor: pointer;
-    font-size: 0.95em;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+    color: #fff; font-size: 1.2em; font-weight: 700;
+    cursor: pointer; transition: all 0.15s;
+}
+.stepper-row button:hover { background: rgba(255,170,0,0.2); border-color: #ffaa00; }
+#study-days-value { font-size: 1.4em; font-weight: 900; min-width: 2ch; text-align: center; }
+.stepper-hint { font-size: 0.8em; color: #666; }
+
+/* Save */
+.settings-actions { display: flex; align-items: center; gap: 16px; margin-top: 32px; }
+#save-settings {
+    padding: 12px 32px;
+    background: linear-gradient(135deg, #ffaa00, #ff6600);
+    color: #000; font-weight: 900; border: none; border-radius: 4px;
+    cursor: pointer; font-size: 0.95em; letter-spacing: 0.05em; text-transform: uppercase;
 }
 #save-settings:hover { opacity: 0.85; }
 #save-status { font-size: 0.85em; color: #33ff99; }
 "#;
 
 const SETTINGS_JS: &str = r#"
+// Work day toggles
 document.querySelectorAll('.day-toggle:not(.always-on)').forEach(label => {
+    label.addEventListener('click', () => label.classList.toggle('checked'));
+});
+
+// Radio options
+document.querySelectorAll('.radio-option').forEach(label => {
     label.addEventListener('click', () => {
-        label.classList.toggle('checked');
+        document.querySelectorAll('.radio-option').forEach(l => l.classList.remove('checked'));
+        label.classList.add('checked');
+        label.querySelector('input').checked = true;
     });
 });
 
+// Stepper
+const studyDaysEl = document.getElementById('study-days-value');
+const MIN_STUDY_DAYS = 3;
+document.getElementById('study-days-dec').addEventListener('click', () => {
+    const v = parseInt(studyDaysEl.dataset.value);
+    if (v > MIN_STUDY_DAYS) { studyDaysEl.dataset.value = v - 1; studyDaysEl.textContent = v - 1; }
+});
+document.getElementById('study-days-inc').addEventListener('click', () => {
+    const v = parseInt(studyDaysEl.dataset.value);
+    studyDaysEl.dataset.value = v + 1; studyDaysEl.textContent = v + 1;
+});
+
+// Save all settings
 document.getElementById('save-settings').addEventListener('click', async () => {
-    const days = Array.from(document.querySelectorAll('input[name="work_day"]'))
+    const status = document.getElementById('save-status');
+    status.textContent = '';
+
+    const workDays = Array.from(document.querySelectorAll('input[name="work_day"]'))
         .filter(cb => cb.closest('.day-toggle').classList.contains('checked'))
         .map(cb => parseInt(cb.dataset.day));
 
-    const status = document.getElementById('save-status');
+    const daysAhead = parseInt(
+        document.querySelector('input[name="days_ahead"]:checked')?.value ?? '2'
+    );
+
+    const studyDays = parseInt(studyDaysEl.dataset.value);
+
     try {
-        const res = await fetch('/api/settings/work-days', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ days }),
-        });
-        if (res.ok) {
+        const results = await Promise.all([
+            fetch('/api/settings/work-days', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ days: workDays }),
+            }),
+            fetch('/api/settings/homework-days-ahead', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: daysAhead }),
+            }),
+            fetch('/api/settings/study-days-before', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ value: studyDays }),
+            }),
+        ]);
+
+        if (results.every(r => r.ok)) {
             status.textContent = '✓ Saved';
             setTimeout(() => { status.textContent = ''; }, 3000);
         } else {
-            status.textContent = '✗ Error saving';
+            status.textContent = '✗ Error saving one or more settings';
         }
     } catch (e) {
         status.textContent = '✗ Network error';
